@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from app.models.enums import SequenceStatus
 from app.models.sequence import Sequence
 from app.schemas.sequence import SequenceCreate, SequenceUpdate, StepInput
-from app.services import VALID_SEQUENCE_TRANSITIONS, SequenceService
+from app.services.sequence_service import VALID_SEQUENCE_TRANSITIONS, SequenceService
 from app.services.exceptions import (
     InvalidSequenceData,
     InvalidStateTransition,
@@ -272,3 +272,64 @@ async def test_update_draft_success_updates_and_replaces_steps() -> None:
             {"subject": "b", "body_html": "<p>b</p>", "delay_minutes": 1440},
         ],
     )
+
+
+@pytest.mark.asyncio
+async def test_create_happy_path_calls_repo_correctly() -> None:
+    service, mock_repo = _sequence_service_with_mock_repo()
+    created_seq = MagicMock(spec=Sequence)
+    created_seq.id = uuid.uuid4()
+    reloaded_seq = MagicMock(spec=Sequence)
+    reloaded_seq.id = created_seq.id
+    mock_repo.create = AsyncMock(return_value=created_seq)
+    mock_repo.create_steps = AsyncMock(return_value=[])
+    mock_repo.get_by_id = AsyncMock(return_value=reloaded_seq)
+
+    data = SequenceCreate(
+        name="Outreach",
+        steps=[StepInput(subject="Hi", body_html="<p>Hello</p>", delay=0)],
+        role_title="SWE",
+    )
+    result = await service.create(data)
+
+    assert result is reloaded_seq
+    mock_repo.create.assert_awaited_once()
+    call_kwargs = mock_repo.create.call_args.kwargs
+    assert call_kwargs["name"] == "Outreach"
+    assert call_kwargs["status"] == SequenceStatus.DRAFT.value
+    assert call_kwargs["role_title"] == "SWE"
+    mock_repo.create_steps.assert_awaited_once_with(
+        created_seq.id,
+        [{"subject": "Hi", "body_html": "<p>Hello</p>", "delay_minutes": 0}],
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_name_only_does_not_replace_steps() -> None:
+    service, mock_repo = _sequence_service_with_mock_repo()
+    seq = MagicMock(spec=Sequence)
+    seq.id = uuid.uuid4()
+    seq.status = SequenceStatus.DRAFT.value
+    mock_repo.get_by_id = AsyncMock(side_effect=[seq, seq])
+
+    data = SequenceUpdate(name="Renamed")
+    await service.update(seq.id, data)
+
+    mock_repo.update.assert_awaited_once_with(seq, name="Renamed")
+    mock_repo.replace_steps.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_steps_only_does_not_call_update() -> None:
+    service, mock_repo = _sequence_service_with_mock_repo()
+    seq = MagicMock(spec=Sequence)
+    seq.id = uuid.uuid4()
+    seq.status = SequenceStatus.DRAFT.value
+    mock_repo.get_by_id = AsyncMock(side_effect=[seq, seq])
+
+    new_steps = [StepInput(subject="New", body_html="<p>x</p>", delay=0)]
+    data = SequenceUpdate(steps=new_steps)
+    await service.update(seq.id, data)
+
+    mock_repo.update.assert_not_awaited()
+    mock_repo.replace_steps.assert_awaited_once()

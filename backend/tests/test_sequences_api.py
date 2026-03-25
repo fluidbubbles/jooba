@@ -224,6 +224,28 @@ async def test_lifecycle_then_terminal_reject(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_sequence_detail_success(client: AsyncClient) -> None:
+    sid = await _create_sequence_id(
+        client,
+        name="Detail Test",
+        steps=[_step(subject="First"), _step(subject="Second", delay=60)],
+    )
+    r = await client.get(f"/api/sequences/{sid}")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["id"] == sid
+    assert data["name"] == "Detail Test"
+    assert data["status"] == "draft"
+    assert len(data["steps"]) == 2
+    assert data["steps"][0]["subject"] == "First"
+    assert data["steps"][0]["delay"] == 0
+    assert data["steps"][1]["subject"] == "Second"
+    assert data["steps"][1]["delay"] == 60
+    assert "created_at" in data
+    assert "updated_at" in data
+
+
+@pytest.mark.asyncio
 async def test_get_nonexistent_404(client: AsyncClient) -> None:
     missing = uuid.uuid4()
     r = await client.get(f"/api/sequences/{missing}")
