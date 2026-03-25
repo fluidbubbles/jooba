@@ -30,5 +30,12 @@ class EmailEvent(Base):
 
     __table_args__ = (
         Index("ix_email_events_thread", "nylas_thread_id"),
+        Index(
+            "ix_email_events_enrollment_direction_sentiment_created",
+            "enrollment_id",
+            "direction",
+            "sentiment",
+            "created_at",
+        ),
         UniqueConstraint("nylas_message_id", name="uq_email_events_message_id"),
     )

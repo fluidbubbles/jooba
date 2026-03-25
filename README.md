@@ -118,8 +118,8 @@ NYLAS_CALLBACK_URL=http://localhost:8000/api/nylas/callback
 # OpenAI
 OPENAI_API_KEY=your_openai_key
 
-# Database
-DATABASE_URL=postgresql://jooba:jooba@db:5432/jooba
+# Database (SQLAlchemy async — must use asyncpg driver)
+DATABASE_URL=postgresql+asyncpg://jooba:jooba@db:5432/jooba
 
 # Redis
 REDIS_URL=redis://redis:6379/0
