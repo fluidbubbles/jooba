@@ -202,11 +202,11 @@ async def test_invalid_status_transition_409(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_change_via_put_sequence_endpoint(client: AsyncClient) -> None:
+async def test_put_sequence_rejects_status_field(client: AsyncClient) -> None:
+    """Status changes must go through PUT /{id}/status, not the general PUT."""
     sid = await _create_sequence_id(client, name="Status via put")
     r = await client.put(f"/api/sequences/{sid}", json={"status": "active"})
-    assert r.status_code == 200
-    assert r.json()["status"] == "active"
+    assert r.status_code == 422  # extra="forbid" rejects unknown field
 
 
 @pytest.mark.asyncio

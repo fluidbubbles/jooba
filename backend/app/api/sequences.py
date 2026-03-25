@@ -59,13 +59,10 @@ async def get_sequence(
 @router.put("/{sequence_id}", response_model=SequenceResponse)
 async def update_sequence(
     sequence_id: UUID,
-    payload: SequenceUpdate | SequenceStatusUpdate,
+    payload: SequenceUpdate,
     service: SequenceServiceDep,
 ) -> SequenceResponse:
-    if isinstance(payload, SequenceStatusUpdate):
-        seq = await service.change_status(sequence_id, payload.status)
-    else:
-        seq = await service.update(sequence_id, payload)
+    seq = await service.update(sequence_id, payload)
     return _to_response(seq)
 
 
