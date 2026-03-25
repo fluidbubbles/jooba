@@ -1113,6 +1113,15 @@ Candidate (many)
 | email_events | (nylas_thread_id) | Webhook: match reply to enrollment |
 | candidates | (email) | CSV upload: deduplication |
 
+**Unique constraints:**
+
+| Table | Constraint | Purpose |
+|-------|-----------|---------|
+| email_events | (nylas_message_id) | Prevent duplicate webhook processing |
+| enrollments | (candidate_id, sequence_id) | Prevent double enrollment |
+
+> **Note:** Status and sentiment enums (and their valid transition map) are defined in `app/models/enums.py`.
+
 ---
 
 ## 8. File Structure
@@ -1132,7 +1141,8 @@ backend/
 │   │   ├── enrollment.py            # Core state machine
 │   │   ├── email_event.py
 │   │   ├── referral.py
-│   │   └── state_transition.py
+│   │   ├── state_transition.py
+│   │   └── enums.py                # Centralized status/sentiment enums + transition map
 │   │
 │   ├── schemas/                     # Pydantic request/response models
 │   │   ├── sequence.py
@@ -1154,7 +1164,7 @@ backend/
 │   │
 │   ├── services/                    # Business logic
 │   │   ├── sequence_service.py      # CRUD + activate/pause
-│   │   ├── enrollment_service.py    # Enroll, advance, reply, opt-out
+│   │   ├── enrollment_service.py    # Enroll, advance, reply, opt-out, nudge
 │   │   ├── email_service.py         # Compose, template replace, append footer
 │   │   ├── classification_service.py # Orchestrate LLM classification
 │   │   ├── referral_service.py      # Extract + create referrals
@@ -1170,7 +1180,7 @@ backend/
 │   │   ├── enrollment.py            # update_on_reply
 │   │   ├── referral.py              # extract_referral
 │   │   ├── scheduler.py             # Periodic: send_due
-│   │   └── transitions.py           # log_state_transition
+│   │   └── dispatcher.py            # Task dispatcher abstraction (CeleryDispatcher, SyncDispatcher)
 │   │
 │   ├── api/                         # Route handlers (thin)
 │   │   ├── sequences.py
@@ -1183,7 +1193,8 @@ backend/
 │   │
 │   └── utils/
 │       ├── tokens.py                # HMAC sign/verify for unsubscribe
-│       └── templates.py             # {{placeholder}} replacement logic
+│       ├── templates.py             # {{placeholder}} replacement logic
+│       └── csv_parser.py            # CSV parsing utility
 │
 ├── alembic/                         # Database migrations
 ├── tests/
