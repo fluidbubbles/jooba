@@ -156,8 +156,7 @@ EnrollmentRepository
 ├── create(candidate_id, sequence_id, ...) → Enrollment
 ├── update_status(id, new_status) → Enrollment
 ├── set_next_send(id, datetime) → None
-├── clear_next_send(id) → None
-└── set_resume_at(id, datetime) → None
+└── clear_next_send(id) → None
 
 EmailEventRepository
 ├── ...
@@ -190,10 +189,6 @@ EnrollmentService
 │   → set status to REPLIED, clear next_send_at,
 │     cancel all pending sends, log transition
 │
-├── reschedule_for_ooo(enrollment_id, return_date)
-│   → push next_send_at to return_date (or now + 7 days if no date),
-│     enrollment stays ACTIVE, log transition
-│
 └── opt_out(unsubscribe_token)
     → validate token, set status to OPTED_OUT,
       clear next_send_at, log transition
@@ -225,8 +220,6 @@ PAUSED → ACTIVE              (recruiter clicks Resume after investigating send
 ```
 
 The service layer validates transitions before applying them. If code tries an invalid transition, it raises an error rather than silently corrupting state.
-
-**OOO is not a state.** When the LLM classifies a reply as Out of Office, it extracts the return date (or defaults to 7 days if none found). The enrollment stays ACTIVE — we simply push `next_send_at` to the return date. The scheduler sends the next step when that date arrives, like any other follow-up. No separate state, no separate Celery task, no `resume_at` field. OOO is just rescheduling.
 
 ### 4.4 Strategy Pattern (Integrations)
 
@@ -267,9 +260,6 @@ When something happens (email received, enrollment status changed), the system d
 "Reply classified as referral" triggers:
 ├── Task: extract_referral        (calls OpenAI, creates referred candidate)
 └── Task: auto_enroll_referral    (enrolls referred person in referral sequence)
-
-"Reply classified as OOO" triggers:
-└── Task: reschedule_for_ooo      (pushes next_send_at to return date, or +7 days if no date found)
 ```
 
 Adding a new reaction (e.g., "send Slack notification on interested reply") means adding one new task. Zero changes to existing code.
@@ -635,10 +625,10 @@ PARALLEL CELERY TASKS:
         └──→ Task: classify_reply
                ├── openai_client.classify(email_body_text)
                │   → sends prompt to GPT-4o-mini with reply text
-               │   → returns: { sentiment, reasoning, ooo_return_date? }
+               │   → returns: { sentiment, reasoning }
                │
                ├── email_event_repo.update_sentiment(
-               │     email_event_id, sentiment, reasoning, ooo_return_date
+               │     email_event_id, sentiment, reasoning
                │   )
                │
                └── Dispatch downstream tasks based on classification:
@@ -648,13 +638,6 @@ PARALLEL CELERY TASKS:
                    │
                    ├── If NOT_INTERESTED:
                    │   └── (no additional task — logged and shown in UI)
-                   │
-                   ├── If OUT_OF_OFFICE:
-                   │   └── reschedule_for_ooo.delay(enrollment_id, return_date)
-                   │       ├── return_date from LLM, or default now + 7 days
-                   │       ├── enrollment.next_send_at = return_date
-                   │       ├── enrollment stays ACTIVE (just rescheduled)
-                   │       └── Log transition: trigger="ooo_rescheduled"
                    │
                    ├── If REFERRAL:
                    │   └── extract_referral.delay(email_event_id)
@@ -738,7 +721,6 @@ Returns: interested/referral/neutral replies the recruiter hasn't responded to.
 
 **Why this works:**
 - NOT_INTERESTED replies are excluded — recruiter intentionally didn't reply
-- OOO replies are excluded — handled by auto-pause, not recruiter action
 - Once the recruiter replies, the candidate disappears from this list (outbound exists after inbound)
 - No timer state to manage, no snooze logic, no dismiss buttons
 - Threshold is an env variable: 5 min for demo, 1440 min (24h) for production
@@ -833,7 +815,6 @@ Frontend renders: stat cards, attention items, sequence table
 | `classify_reply` | `ai` | Nylas webhook handler | Calls LLM to classify reply sentiment |
 | `extract_referral` | `ai` | `classify_reply` (when referral) | Calls LLM to extract referred person, creates candidate |
 | `update_enrollment_on_reply` | `default` | Nylas webhook handler | Marks enrollment as REPLIED, cancels follow-ups |
-| `reschedule_for_ooo` | `default` | `classify_reply` (when OOO) | Pushes next_send_at to return date (or +7 days default) |
 | `log_state_transition` | `default` | Various | Writes audit log entry |
 
 ### Queue Strategy
@@ -861,8 +842,7 @@ celery-default:
 ```
 Nylas webhook arrives
   ├── classify_reply
-  │   ├── (if referral) → extract_referral
-  │   └── (if ooo) → reschedule_for_ooo
+  │   └── (if referral) → extract_referral
   └── update_enrollment_on_reply
       └── log_state_transition
 ```
@@ -959,7 +939,7 @@ backend/
 │   │   ├── base.py                  # Generic CRUD mixin
 │   │   ├── sequence_repo.py
 │   │   ├── candidate_repo.py
-│   │   ├── enrollment_repo.py       # get_due, get_resumable
+│   │   ├── enrollment_repo.py       # get_due
 │   │   ├── email_event_repo.py      # find_by_thread, create, update_sentiment
 │   │   ├── referral_repo.py
 │   │   ├── transition_repo.py
@@ -967,7 +947,7 @@ backend/
 │   │
 │   ├── services/                    # Business logic
 │   │   ├── sequence_service.py      # CRUD + activate/pause
-│   │   ├── enrollment_service.py    # Enroll, advance, reply, OOO, opt-out
+│   │   ├── enrollment_service.py    # Enroll, advance, reply, opt-out
 │   │   ├── email_service.py         # Compose, template replace, append footer
 │   │   ├── classification_service.py # Orchestrate LLM classification
 │   │   ├── referral_service.py      # Extract + create referrals
@@ -980,7 +960,7 @@ backend/
 │   ├── tasks/                       # Celery tasks
 │   │   ├── email_sending.py         # send_sequence_email
 │   │   ├── classification.py        # classify_reply
-│   │   ├── enrollment.py            # update_on_reply, reschedule_ooo
+│   │   ├── enrollment.py            # update_on_reply
 │   │   ├── referral.py              # extract_referral
 │   │   ├── scheduler.py             # Periodic: send_due
 │   │   └── transitions.py           # log_state_transition
