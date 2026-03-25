@@ -1,8 +1,6 @@
 import uuid
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.enums import SequenceStatus
 from app.models.sequence import Sequence
 from app.repositories.sequence_repo import SequenceRepository
@@ -27,8 +25,8 @@ _SEQUENCE_UPDATE_OPTIONAL_FIELDS: tuple[str, ...] = (
 
 
 class SequenceService:
-    def __init__(self, db: AsyncSession) -> None:
-        self._repo = SequenceRepository(db)
+    def __init__(self, repo: SequenceRepository) -> None:
+        self._repo = repo
 
     async def _reload_sequence(self, sequence_id: uuid.UUID, *, missing_message: str) -> Sequence:
         reloaded = await self._repo.get_by_id(sequence_id)

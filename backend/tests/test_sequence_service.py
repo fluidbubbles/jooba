@@ -18,9 +18,8 @@ from app.services.exceptions import (
 
 
 def _sequence_service_with_mock_repo() -> tuple[SequenceService, AsyncMock]:
-    service = SequenceService(AsyncMock())
     mock_repo = AsyncMock()
-    service._repo = mock_repo  # type: ignore[method-assign]
+    service = SequenceService(mock_repo)
     return service, mock_repo
 
 

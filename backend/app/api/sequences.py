@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.sequence import Sequence
+from app.repositories.sequence_repo import SequenceRepository
 from app.schemas.sequence import (
     SequenceCreate,
     SequenceListItem,
@@ -23,7 +24,7 @@ def _to_response(seq: Sequence) -> SequenceResponse:
 
 
 def get_sequence_service(db: AsyncSession = Depends(get_db)) -> SequenceService:
-    return SequenceService(db)
+    return SequenceService(SequenceRepository(db))
 
 
 SequenceServiceDep = Annotated[SequenceService, Depends(get_sequence_service)]
