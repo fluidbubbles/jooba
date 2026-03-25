@@ -240,7 +240,11 @@ async def test_get_sequence_detail_success(client: AsyncClient) -> None:
     assert data["steps"][0]["subject"] == "First"
     assert data["steps"][0]["delay"] == 0
     assert data["steps"][1]["subject"] == "Second"
+    assert data["steps"][0]["step_order"] == 0
+    assert data["steps"][1]["step_order"] == 1
     assert data["steps"][1]["delay"] == 60
+    assert data["role_title"] is None
+    assert data["company"] is None
     assert "created_at" in data
     assert "updated_at" in data
 

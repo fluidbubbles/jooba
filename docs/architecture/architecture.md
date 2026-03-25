@@ -493,10 +493,7 @@ Recruiter clicks "Create Sequence"
 │  ── Context (optional) ───────────────────────────  │
 │  Role Title:     [                              ]   │
 │  Company:        [                              ]   │
-│  About Company:  [                              ]   │
-│  Key Selling     [                              ]   │
-│  Points:         [                              ]   │
-│  Tone:           [ Professional ▼ ]                 │
+│                                                     │
 │                                                     │
 │  ── Steps ─────────────────────────────────────     │
 │  Step 1: Subject [                              ]   │
@@ -514,7 +511,7 @@ Recruiter clicks "Create Sequence"
 └─────────────────────────────────────────────────────┘
 ```
 
-The recruiter types the subject and body for each step, sets delays between steps, and optionally fills in context metadata (role, company, selling points, tone) that describe what this sequence is targeting.
+The recruiter types the subject and body for each step, sets delays between steps, and optionally fills in context metadata (role title, company) that describe what this sequence is targeting.
 
 #### 5.2.2 Save Flow
 
@@ -525,8 +522,7 @@ Recruiter clicks "Save Draft" or "Save & Activate"
 Frontend → POST /api/sequences
            {
              name, steps: StepInput[],
-             metadata: { role_title, company, about_company,
-                         selling_points, tone }
+             role_title, company
            }
         │
         ▼
@@ -550,15 +546,14 @@ Frontend shows sequence in draft state with "Activate" button
 
 Activating is a separate call: `PUT /api/sequences/:id { status: "active" }`. The recruiter reviews emails before they go live.
 
-The sequence metadata (role, company, selling points, tone) is stored on the Sequence record for UI context — it shows what this sequence is targeting.
+The sequence metadata (role title, company) is stored on the Sequence record for UI context — it shows what this sequence is targeting.
 
 #### 5.2.3 Sequence Data Model
 
 ```
 Sequence
 ├── id, name, status (DRAFT/ACTIVE/PAUSED/ARCHIVED)
-├── role_title, company, about_company     ← context metadata (optional)
-├── selling_points, tone                   ← context metadata (optional)
+├── role_title, company                    ← context metadata (optional)
 ├── created_at, updated_at
 │
 ├── SequenceStep (many, ordered by step_order)

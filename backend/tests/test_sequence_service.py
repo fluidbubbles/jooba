@@ -277,12 +277,13 @@ async def test_update_draft_success_updates_and_replaces_steps() -> None:
 @pytest.mark.asyncio
 async def test_create_happy_path_calls_repo_correctly() -> None:
     service, mock_repo = _sequence_service_with_mock_repo()
+    seq_id = uuid.uuid4()
     created_seq = MagicMock(spec=Sequence)
-    created_seq.id = uuid.uuid4()
+    created_seq.id = seq_id
     reloaded_seq = MagicMock(spec=Sequence)
-    reloaded_seq.id = created_seq.id
+    reloaded_seq.id = seq_id
     mock_repo.create = AsyncMock(return_value=created_seq)
-    mock_repo.create_steps = AsyncMock(return_value=[])
+    mock_repo.create_steps = AsyncMock()
     mock_repo.get_by_id = AsyncMock(return_value=reloaded_seq)
 
     data = SequenceCreate(
@@ -302,6 +303,7 @@ async def test_create_happy_path_calls_repo_correctly() -> None:
         created_seq.id,
         [{"subject": "Hi", "body_html": "<p>Hello</p>", "delay_minutes": 0}],
     )
+    mock_repo.get_by_id.assert_awaited_once_with(seq_id)
 
 
 @pytest.mark.asyncio
@@ -332,4 +334,7 @@ async def test_update_steps_only_does_not_call_update() -> None:
     await service.update(seq.id, data)
 
     mock_repo.update.assert_not_awaited()
-    mock_repo.replace_steps.assert_awaited_once()
+    mock_repo.replace_steps.assert_awaited_once_with(
+        seq.id,
+        [{"subject": "New", "body_html": "<p>x</p>", "delay_minutes": 0}],
+    )

@@ -5,7 +5,6 @@ from app.services.exceptions import (
     CandidateNotFound,
     DomainError,
     EnrollmentNotActive,
-    InvalidSequenceData,
     InvalidStateTransition,
     SequenceNotFound,
 )
@@ -42,12 +41,6 @@ def register_exception_handlers(app: FastAPI) -> None:
         _request: Request, exc: InvalidStateTransition
     ) -> JSONResponse:
         return _domain_error_response(exc, 409)
-
-    @app.exception_handler(InvalidSequenceData)
-    async def invalid_sequence_data(
-        _request: Request, exc: InvalidSequenceData
-    ) -> JSONResponse:
-        return _domain_error_response(exc, 400)
 
     @app.exception_handler(DomainError)
     async def domain_error(_request: Request, exc: DomainError) -> JSONResponse:
