@@ -7,6 +7,9 @@ Take-home: recruiter outreach (sequences, CSV enroll, Nylas, LLM classification)
 - When building prioritized delivery or feature task lists, frame each item as a full-stack vertical slice (UI through API, services, and repositories); acceptance criteria should verify backend behavior and data, not only what appears in the browser.
 - Treat `docs/architecture/architecture.md` as the source of truth when product screens or exported mockups disagree; align Pencil designs and mockup PNGs to the architecture rather than the other way around.
 - When the user scopes work as “Pencil only,” keep changes in the Pencil / `.pen` workflow and avoid editing application frontend code unless they expand the scope.
+- Keep API schemas domain-first: expose neutral names (for example `delay`) in JSON; keep storage-oriented names (for example `delay_minutes`) on models and in service/repo payloads, not in public request/response shapes.
+- Avoid module-level `__all__` by default; prefer explicit imports unless wildcard re-exports are required.
+- For multi-task implementation plans, run code-simplifier and code-reviewer checks after each task boundary before moving to the next task.
 
 ## Learned workspace facts
 
@@ -75,14 +78,17 @@ Use these defaults unless the user explicitly overrides. These rules apply to al
 - **Frontend API client:** Reuse `apiFetch` in `frontend/src/lib/api.ts`; avoid introducing duplicate request wrappers.
 - **`EmptyState` contract:** Keep `EmptyState` as the default export with `icon: LucideIcon` (do not mix competing icon prop APIs).
 - **Route replacement rule:** When implementing pages in `frontend/src/App.tsx`, replace placeholder routes instead of adding duplicate paths.
-- **Sequence step invariant:** First step must always have `delay_minutes = 0`; if steps are removed/reordered, normalize before submit.
+- **Sequence step invariant:** First step must always have `delay = 0`; if steps are removed/reordered, normalize before submit.
 - **Aggregation query rule:** Count concrete columns (for example `SequenceStep.id`), not relationship attributes; avoid N+1 loops for list counters.
 - **Testing rule:** API integration tests must run with an isolated DB dependency override/fixture; service tests should assert behaviors and exception paths, not only constants.
+- **Regression test rule:** When a bug or issue is identified, add a regression test that reproduces the failure. Then have subagents try to fix the bug and prove it with a passing test.
+- **No inline imports:** All imports must be at the top of the file. Never use inline/local imports inside functions or methods.
 
 ## Package-level CLAUDE.md policy
 
 - Keep local `CLAUDE.md` files in package directories concise and domain-specific.
 - Parent `CLAUDE.md` instructions still apply; local files add constraints for that package only.
+- **When modifying package files, update that package's `CLAUDE.md` if the change alters contracts, responsibilities, or conventions documented there.**
 - Update package files when responsibilities or contracts change in that package.
 
 ## Working in package folders

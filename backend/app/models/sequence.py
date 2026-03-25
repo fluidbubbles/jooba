@@ -16,9 +16,6 @@ class Sequence(Base):
     status: Mapped[str] = mapped_column(String(20), default=SequenceStatus.DRAFT.value)
     role_title: Mapped[str | None] = mapped_column(String(255))
     company: Mapped[str | None] = mapped_column(String(255))
-    about_company: Mapped[str | None] = mapped_column(Text)
-    selling_points: Mapped[str | None] = mapped_column(Text)
-    tone: Mapped[str | None] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
