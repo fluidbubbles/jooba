@@ -572,18 +572,24 @@ Sequence
 Recruiter uploads CSV on sequence detail page
         │
         ▼
-Frontend parses CSV client-side, shows preview
+Frontend parses CSV client-side, shows preview table
         │
         ▼
-Frontend → POST /api/sequences/:id/enroll (multipart form with CSV)
+Frontend → POST /api/sequences/:id/enroll
+           { candidates: [ {email, first_name, last_name, company, title}, ... ] }
+           (structured JSON — API layer does NOT receive raw CSV)
         │
         ▼
-API Layer: receives file, passes to service
+API Layer: validates request body via Pydantic schema
+  └── Passes list[CandidateInput] to service
         │
         ▼
-Service Layer: enrollment_service.enroll_candidates(sequence_id, csv_data)
+Service Layer: enrollment_service.enroll_candidates(sequence_id, candidates)
   │
-  ├── Parse CSV rows into candidate records
+  │  (receives structured data, NOT raw CSV — see utils/csv_parser.py
+  │   for server-side parsing if CSV upload goes through multipart)
+  │
+  ├── Deduplicate by email within the batch
   │
   ├── For each candidate email:
   │   ├── candidate_repo.get_by_email(email)
@@ -598,7 +604,7 @@ Service Layer: enrollment_service.enroll_candidates(sequence_id, csv_data)
   │   │     candidate_id, sequence_id, status=ACTIVE,
   │   │     current_step=0, next_send_at, unsubscribe_token
   │   │   )
-  │   └── Log state transition: null → ACTIVE, trigger="enrolled"
+  │   └── _log_transition(enrollment, null → ACTIVE, trigger="enrolled")
   │
   └── Return: { enrolled: 142, already_existed: 8, total: 150 }
         │
@@ -617,7 +623,9 @@ when their next_send_at arrives.
 
 ### 5.4 Sending Emails (Scheduler)
 
-This is a **background process**, not triggered by any API call.
+This is a **background process**, not triggered by any API call. It has three layers: the scheduler claims work, a thin Celery task applies retry policy, and a service method contains all business logic.
+
+#### The Scheduler Claim Pattern
 
 ```
 Celery Beat (every 30 seconds)
@@ -626,77 +634,84 @@ Celery Beat (every 30 seconds)
 Triggers task: send_due_emails
         │
         ▼
-Task queries: enrollment_repo.get_due_enrollments()
-  → SELECT * FROM enrollments
-    WHERE status = 'active'
-    AND next_send_at <= now()
-    JOIN sequence_steps, candidates, sequences
+Scheduler atomically claims due enrollments:
+  UPDATE enrollments SET next_send_at = NULL
+  WHERE ... FOR UPDATE SKIP LOCKED (see Section 4.6)
+  → Returns list of claimed enrollment IDs
         │
         ▼
-For each due enrollment, dispatch: send_sequence_email.delay(enrollment_id)
-        │
-        ▼
-Individual send task (runs in Celery worker):
-  │
-  ├── Load enrollment + candidate + sequence step
-  │
-  ├── email_service.compose(step, candidate)
-  │   ├── Replace {{first_name}}, {{company}}, etc. in subject + body
-  │   └── Append unsubscribe footer with enrollment's unique token URL
-  │
-  ├── nylas_client.send_email(
-  │     grant_id=nylas_account.grant_id,
-  │     to=candidate.email,
-  │     subject=composed_subject,
-  │     body_html=composed_body,
-  │     reply_to_message_id=last_outbound_message_id  (for threading)
-  │   )
-  │
-  ├── email_event_repo.create(
-  │     enrollment_id, direction=OUTBOUND,
-  │     step_index=current_step, subject, body,
-  │     nylas_message_id, nylas_thread_id
-  │   )
-  │
-  ├── Determine next state:
-  │   ├── If more steps remain:
-  │   │   ├── next_step = sequence.steps[current_step + 1]
-  │   │   ├── enrollment.current_step += 1
-  │   │   └── enrollment.next_send_at = now() + next_step.delay_minutes
-  │   └── If this was the last step:
-  │       ├── enrollment.status = COMPLETED
-  │       ├── enrollment.next_send_at = null
-  │       └── enrollment.completed_at = now()
-  │
-  └── Log state transition: trigger="email_sent", metadata={step_index}
-  
-  On failure (error-type determines behavior):
-  │
-  ├── Rate limit (429):
-  │   ├── Read Retry-After header from Nylas response
-  │   ├── Celery retry with delay = Retry-After (or exponential: 30s, 60s, 120s)
-  │   ├── No max retry cap — rate limits always resolve, just wait
-  │   └── Log as transient, do NOT change enrollment status
-  │
-  ├── Transient error (5xx, timeout, connection error):
-  │   ├── Celery retries with exponential backoff (30s, 60s, 120s)
-  │   ├── Max 5 retries
-  │   └── After 5 failures: mark enrollment PAUSED, log transition
-  │       (recruiter can investigate + resume — not data loss)
-  │
-  ├── Permanent error (invalid grant, auth revoked):
-  │   ├── No retry — it won't fix itself
-  │   ├── Pause ALL enrollments for this account
-  │   └── Surface in Settings: "Email disconnected — please reconnect"
-  │
-  └── Bounce (Nylas webhook: message.bounce):
-      ├── Mark enrollment BOUNCED — this is the ONLY path to BOUNCED
-      └── BOUNCED is never set from a send failure, only from a
-          bounce webhook (recipient server rejected the email)
+For each claimed enrollment, dispatch: send_sequence_email.delay(enrollment_id)
+```
 
-  Proactive rate limit prevention:
-  ├── Token bucket in scheduler: max 40 sends/minute (Nylas free = ~50/min)
-  └── Scheduler batches with 60s pause between chunks of 40
+#### The Send Task (Thin Wrapper)
+
+The Celery task contains zero business logic — it calls the service and applies retry policy based on the exception type.
+
+```
+send_sequence_email (Celery task):
+  try:
+      enrollment_service.advance_step(enrollment_id)
+  except RateLimitError as e:
+      retry with countdown = e.retry_after
+  except TransientError:
+      retry with exponential backoff (30s, 60s, 120s, 240s, 480s)
+      After 5 failures: enrollment_service.mark_paused(enrollment_id)
+  except PermanentError:
+      enrollment_service.pause_all_for_account(account_id)
+```
+
+#### The Service Method (All Business Logic)
+
+All email sending logic lives in `enrollment_service.advance_step()`. Each sub-step is a private method, making the flow readable and testable.
+
+```
+enrollment_service.advance_step(enrollment_id):
+  │
+  ├── enrollment = enrollment_repo.get_by_id(enrollment_id)
+  │   (simple lookup — claim pattern provides exclusivity)
+  │
+  ├── _validate_sendable(enrollment)
+  │   Check status == ACTIVE. If not, return early (idempotency guard).
+  │
+  ├── composed = _compose_email(enrollment)
+  │   Load sequence step, candidate data
+  │   Replace {{first_name}}, {{company}}, etc.
+  │   Append unsubscribe footer with enrollment's token URL
+  │
+  ├── result = email_sender.send(composed)
+  │   Calls integration (NylasSender)
+  │   grant_id, to, subject, body_html, reply_to_message_id
+  │
+  ├── _record_email_event(enrollment, result)
+  │   email_event_repo.create(enrollment_id, direction=OUTBOUND,
+  │   step_index, subject, body, nylas_message_id, nylas_thread_id)
+  │
+  ├── _advance_or_complete(enrollment)
+  │   If more steps: enrollment.current_step += 1,
+  │                  enrollment.next_send_at = now() + next_step.delay_minutes
+  │   If last step: enrollment.status = COMPLETED,
+  │                 enrollment.next_send_at = null
+  │
+  └── _log_transition(enrollment, "email_sent")
+      Synchronous write in same transaction.
+```
+
+#### Error Handling Taxonomy
+
+Services raise domain exceptions. The task layer catches them and applies retry policy.
+
+| Error Type | Exception | Task Behavior | Enrollment Impact |
+|---|---|---|---|
+| Rate limit (429) | `RateLimitError` | Retry with `countdown = e.retry_after`. No max retry cap — rate limits always resolve. | No status change |
+| Transient (5xx, timeout) | `TransientError` | Exponential backoff: 30s, 60s, 120s, 240s, 480s. Max 5 retries. | After 5 failures: PAUSED (recruiter can investigate + resume) |
+| Auth revoked | `PermanentError` | No retry — it won't fix itself | Pause ALL enrollments for this account. Surface in Settings: "Email disconnected — please reconnect" |
+| Bounce | (via Nylas webhook, not send task) | N/A — handled by webhook flow | BOUNCED. This is the ONLY path to BOUNCED — never set from a send failure, only from a bounce webhook (recipient server rejected). |
+
+#### Proactive Rate Limit Prevention
+
+```
+Token bucket in scheduler: max 40 sends/minute (Nylas free = ~50/min)
+Scheduler batches with 60s pause between chunks of 40
 ```
 
 **Why individual tasks per enrollment**: If sending to candidate #45 fails, it doesn't block candidates #46-150. Each send is isolated. Celery handles retries per task.
@@ -706,6 +721,8 @@ Individual send task (runs in Celery worker):
 ### 5.5 Message Detection, Filtering + Classification
 
 Nylas fires a webhook for **every new message** in the connected account — inbound and outbound, regardless of source. This includes candidate replies, the recruiter's own replies from their email client, newsletters, personal emails, and spam. Our webhook handler filters the noise.
+
+The `process_webhook()` method is decomposed into private methods that each handle one concern:
 
 ```
 Any new message appears in recruiter's mailbox
@@ -722,57 +739,60 @@ API Layer:
         ▼
 Service Layer: email_service.process_webhook(data)
   │
-  ├── STEP 1: Match to a known thread
+  ├── enrollment = _match_to_enrollment(thread_id, sender_email)
   │   ├── Try 1: email_event_repo.find_by_thread_id(thread_id)
   │   │   → finds an outbound email we sent in the same thread
   │   │   → gets enrollment_id from that email event
   │   ├── Try 2 (fallback): candidate_repo.find_by_email(sender_email)
   │   │   → finds candidate → finds active enrollment
-  │   └── If no match on either: DISCARD silently, return 200
+  │   └── If no match on either: return None
   │       (this is a non-candidate email — newsletter, personal, spam)
   │
-  ├── STEP 2: Determine direction
+  ├── If enrollment is None: DISCARD silently, return 200
+  │
+  ├── direction = _determine_direction(sender_email, account_email)
   │   ├── If sender_email == connected_account.email:
-  │   │   → This is the RECRUITER sending (from their email client, not the app)
-  │   │   → direction = OUTBOUND, source = "external"
-  │   │   → Record it so the thread stays complete in our UI
-  │   │   → Record it so the thread stays complete in our UI
-  │   │   → Do NOT classify (it's not a candidate reply)
-  │   │   → DONE
+  │   │   → direction = OUTBOUND (recruiter sent from email client)
   │   └── Else:
-  │       → This is a CANDIDATE replying
-  │       → direction = INBOUND, source = "webhook"
-  │       → Continue to classification
+  │       → direction = INBOUND (candidate reply)
   │
-  ├── STEP 3: Record the inbound message
-  │   email_event_repo.create(
-  │     enrollment_id, direction=INBOUND,
-  │     subject, body_html, body_text,
-  │     nylas_message_id, nylas_thread_id
-  │   )
+  ├── If OUTBOUND:
+  │   → _record_external_reply(enrollment, data)
+  │   → _set_nudge_timer(enrollment) via enrollment_service.set_nudge()
+  │   → DONE (do NOT classify — it's not a candidate reply)
   │
-  ├── STEP 4: Dispatch async tasks (fire and return fast)
-  │   ├── classify_reply.delay(email_event_id)        → queue: ai
-  │   └── update_enrollment_on_reply.delay(email_event_id) → queue: default
+  ├── If INBOUND:
+  │   ├── _record_inbound(enrollment, data)
+  │   │   email_event_repo.create(
+  │   │     enrollment_id, direction=INBOUND,
+  │   │     subject, body_html, body_text,
+  │   │     nylas_message_id, nylas_thread_id
+  │   │   )
+  │   │
+  │   └── _dispatch_classification(email_event_id, enrollment_id)
+  │       ├── self.dispatcher.dispatch("classify_reply", email_event_id)
+  │       └── self.dispatcher.dispatch("update_enrollment_on_reply", email_event_id)
   │
   └── Return 200 to Nylas immediately (webhook must respond fast)
 ```
+
+**Parallel dispatch safety:** `classify_reply` and `update_enrollment_on_reply` run in parallel. This is safe because all downstream classification tasks operate on the `email_event_id`, not the enrollment status. See Section 4.5 for details. If a future classification category requires keeping the enrollment ACTIVE (not REPLIED), the flow must change to sequential: classify first, then conditionally update.
 
 **Why this works for all scenarios:**
 
 | Message type | thread_id match? | sender match? | Action |
 |---|---|---|---|
 | Candidate replies to outreach | Yes | Yes (candidate) | Process: classify, update enrollment |
-| Recruiter replies from email client | Yes | Yes (recruiter) | Record as external outbound (clears unreplied state) |
+| Recruiter replies from email client | Yes | Yes (recruiter) | Record as external outbound, set nudge timer |
 | Recruiter replies from app | Yes | Yes (recruiter) | Already recorded by send_manual_reply, webhook deduped by message_id |
 | Random email (mom, newsletter, spam) | No | No | Discard silently |
 | Candidate emails recruiter outside a thread | No | Maybe | Fallback sender match catches known candidates |
 
 **The thread chain is never broken.** Whether the recruiter replies from the app or from their email client, the message is in the same thread. Nylas sees both. The candidate's next reply is always captured because we're matching on thread_id, not on how the previous message was sent.
-        │
-        ▼
-PARALLEL CELERY TASKS:
-        │
+
+#### Parallel Celery Tasks (dispatched by `_dispatch_classification`)
+
+```
         ├──→ Task: update_enrollment_on_reply
         │      ├── enrollment_service.mark_replied(enrollment_id)
         │      │   ├── enrollment.status = REPLIED
@@ -798,7 +818,7 @@ PARALLEL CELERY TASKS:
                    │   └── (no additional task — logged and shown in UI)
                    │
                    ├── If REFERRAL:
-                   │   └── extract_referral.delay(email_event_id)
+                   │   └── self.dispatcher.dispatch("extract_referral", email_event_id)
                    │       ├── openai_client.extract_referral(email_body)
                    │       │   → { referred_email, referred_name, referred_title }
                    │       ├── candidate_repo.get_or_create(referred_email, name, title)
@@ -809,6 +829,8 @@ PARALLEL CELERY TASKS:
                        └── (no additional task)
 ```
 
+**Classification categories:** 4 sentiments — INTERESTED, NOT_INTERESTED, REFERRAL, NEUTRAL (see Section 4.7 for enum definitions).
+
 ---
 
 ### 5.6 Recruiter Replies From Inbox
@@ -818,13 +840,13 @@ Recruiter reads candidate reply in Inbox page, types response
         │
         ▼
 Frontend → POST /api/replies/:email_event_id/reply
-           { body_html }
+           { body_html, nudge_delay_minutes }
         │
         ▼
 API Layer: validates, calls service
         │
         ▼
-Service Layer: email_service.send_manual_reply(email_event_id, body_html)
+Service Layer: email_service.send_manual_reply(email_event_id, body_html, nudge_delay)
   │
   ├── Load original email event → get thread_id, enrollment_id
   │
@@ -840,6 +862,11 @@ Service Layer: email_service.send_manual_reply(email_event_id, body_html)
   │     is_manual_reply=True, subject, body_html,
   │     nylas_message_id, nylas_thread_id
   │   )
+  │
+  ├── enrollment_service.set_nudge(enrollment_id, nudge_delay_minutes)
+  │   → compute nudge_due_at = now() + delay_minutes
+  │   → save to enrollment, log transition
+  │   (nudge logic lives in enrollment_service, NOT inline here)
   │
   └── Log transition: trigger="manual_reply_sent"
         │
@@ -895,7 +922,7 @@ Returns: interested/referral/neutral replies the recruiter hasn't responded to.
 
 ---
 
-### 5.7 Unsubscribe
+### 5.8 Unsubscribe
 
 ```
 Candidate clicks unsubscribe link in email footer:
