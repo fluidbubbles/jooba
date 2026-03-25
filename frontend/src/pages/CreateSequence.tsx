@@ -145,8 +145,10 @@ export default function CreateSequence() {
         }
         navigate(`/sequences/${sequenceIdForRun}`)
       } catch (e) {
+        console.error('Failed to save sequence:', e)
         if (sequenceIdForRun) {
-          setError('Sequence was saved as draft. Retry activation or open the draft from Sequences.')
+          const detail = e instanceof ApiRequestError ? ` ${e.message}` : ''
+          setError(`Sequence was saved as draft, but activation failed.${detail} Retry activation or open the draft from Sequences.`)
         } else {
           setError(e instanceof ApiRequestError ? e.message : 'Something went wrong. Try again.')
         }

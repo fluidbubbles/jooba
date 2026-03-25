@@ -29,6 +29,7 @@ export default function SequencesList() {
       const data = await api.sequences.list()
       setItems(data)
     } catch (e) {
+      console.error('Failed to load sequences:', e)
       setError(e instanceof ApiRequestError ? e.message : 'Failed to load sequences')
     } finally {
       setLoading(false)

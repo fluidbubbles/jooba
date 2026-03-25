@@ -135,6 +135,7 @@ export default function SequenceDetail() {
       if (isOutdatedRequest(loadToken, id, latestLoadRef, activeRouteIdRef)) return
       setSequence(data)
     } catch (e) {
+      console.error('Failed to load sequence:', e)
       if (isOutdatedRequest(loadToken, id, latestLoadRef, activeRouteIdRef)) return
       setSequence(null)
       setLoadError(apiErrorMessage(e, 'Failed to load sequence'))
@@ -167,6 +168,7 @@ export default function SequenceDetail() {
         setSequence(updated)
       }
     } catch (e) {
+      console.error('Failed to update status:', e)
       if (!isOutdatedRequest(actionToken, targetId, latestStatusActionRef, activeRouteIdRef)) {
         setActionError(apiErrorMessage(e, 'Failed to update status'))
       }

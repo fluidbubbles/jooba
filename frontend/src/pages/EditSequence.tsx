@@ -141,6 +141,7 @@ export default function EditSequence() {
       setLoadedSequence(data)
       applySequenceToForm(data)
     } catch (e) {
+      console.error('Failed to load sequence:', e)
       if (isOutdatedRequest(loadToken, id, latestLoadRef, activeRouteIdRef)) return
       setLoadedSequence(null)
       setLoadError(apiErrorMessage(e, 'Failed to load sequence'))
@@ -206,6 +207,7 @@ export default function EditSequence() {
         navigate(`/sequences/${id}`)
       }
     } catch (e) {
+      console.error('Failed to save sequence:', e)
       if (!isOutdatedRequest(saveToken, id, latestSaveRef, activeRouteIdRef)) {
         setSaveError(apiErrorMessage(e, 'Something went wrong. Try again.'))
       }
