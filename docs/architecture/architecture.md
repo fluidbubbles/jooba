@@ -53,17 +53,21 @@ The architecture follows **Layered Architecture** with **Event-Driven Side Effec
              └───────────┘
 ```
 
-**Five processes, one codebase:**
+**Seven processes, one codebase:**
 
 | Process | Role | Docker Service |
 |---------|------|----------------|
 | FastAPI server | Handles HTTP requests from UI + Nylas webhooks | `backend` |
-| Celery worker | Executes async tasks (classify, send, extract) | `celery-worker` |
+| Celery email worker | Sends emails via Nylas (rate-limited) | `celery-email` |
+| Celery AI worker | Runs LLM classification and extraction | `celery-ai` |
+| Celery default worker | Fast DB operations (status updates) | `celery-default` |
 | Celery beat | Triggers periodic tasks on a schedule | `celery-beat` |
 | PostgreSQL | Persistent data storage | `db` |
 | Redis | Celery message broker + result backend | `redis` |
 
 The React frontend is a separate service (`frontend`) that only talks to the FastAPI server over REST.
+
+For the demo, a single worker with `-Q email,ai,default` is sufficient.
 
 ---
 
@@ -990,17 +994,18 @@ Frontend renders: stat cards, attention items, sequence table
 
 | Task | Interval | What it does |
 |------|----------|-------------|
-| `send_due_emails` | Every 30s | Finds enrollments where next_send_at <= now, dispatches individual send tasks |
+| `send_due_emails` | Every 30s | Claims due enrollments via `FOR UPDATE SKIP LOCKED` (Section 4.6), dispatches individual `send_sequence_email` tasks |
 
 ### On-Demand Tasks (dispatched by API/services)
 
 | Task | Queue | Triggered by | What it does |
 |------|-------|-------------|-------------|
-| `send_sequence_email` | `email` | `send_due_emails` periodic task | Sends one email for one enrollment via Nylas |
-| `classify_reply` | `ai` | Nylas webhook handler | Calls LLM to classify reply sentiment |
-| `extract_referral` | `ai` | `classify_reply` (when referral) | Calls LLM to extract referred person, creates candidate |
-| `update_enrollment_on_reply` | `default` | Nylas webhook handler | Marks enrollment as REPLIED, cancels follow-ups |
-| `log_state_transition` | `default` | Various | Writes audit log entry |
+| `send_sequence_email` | `email` | `send_due_emails` | Calls `enrollment_service.advance_step(enrollment_id)`. Handles retry policy per error type. |
+| `classify_reply` | `ai` | Webhook handler (via dispatcher) | Calls `classification_service.classify(email_event_id)`. Saves sentiment, dispatches downstream tasks if referral. |
+| `extract_referral` | `ai` | `classify_reply` (when referral) | Calls `referral_service.process_referral(email_event_id)`. Extracts referred contact, creates candidate record. |
+| `update_enrollment_on_reply` | `default` | Webhook handler (via dispatcher) | Calls `enrollment_service.mark_replied(enrollment_id)`. Sets REPLIED, cancels follow-ups. |
+
+Note: `log_state_transition` is NOT in this table — it's now synchronous inside service methods.
 
 ### Queue Strategy
 
@@ -1008,9 +1013,11 @@ Three queues prevent tasks from blocking each other:
 
 | Queue | Purpose | Why separate |
 |-------|---------|-------------|
-| `email` | All Nylas send operations | Nylas has rate limits. Don't let classification backlog block sends. |
-| `ai` | All LLM calls (classify, extract) | LLM calls are slow (1-3s). Don't let them clog the email queue. |
-| `default` | Fast DB operations (status updates, logging) | Should never be blocked by external API calls. |
+| `email` | All Nylas send operations | Rate-limited. Don't let classification backlog block sends. |
+| `ai` | All LLM calls (classify, extract) | Slow (1-3s). Don't let them clog the email queue. |
+| `default` | Fast DB operations (status updates) | Should never be blocked by external API calls. |
+
+**Note for demo:** A single Celery worker processing all three queues (`-Q email,ai,default`) is sufficient for the take-home. Three separate workers is a production optimization for independent scaling.
 
 ```yaml
 # docker-compose.yml
@@ -1025,33 +1032,48 @@ celery-default:
 ### Task Chains
 
 ```
-Nylas webhook arrives
-  ├── classify_reply
-  │   └── (if referral) → extract_referral
-  └── update_enrollment_on_reply
-      └── log_state_transition
+Webhook arrives → email_service.process_webhook() dispatches via TaskDispatcher:
+  ├── classify_reply(email_event_id)            → ai queue
+  │   └── (if referral) → extract_referral      → ai queue
+  └── update_enrollment_on_reply(email_event_id) → default queue
+
+These run in parallel. Safe because all downstream tasks operate on email_event_id,
+not enrollment status. See Section 4.5 for the safety argument.
 ```
 
 ### Retry Policy
 
-| Task | Max Retries | Backoff | On exhaustion | Why |
-|------|-------------|---------|---------------|-----|
-| `send_sequence_email` (rate limit 429) | Unlimited | Retry-After header or exponential (30s, 60s, 120s) | N/A — always resolves | Rate limits are transient, never give up |
-| `send_sequence_email` (5xx/timeout) | 5 | Exponential (30s, 60s, 120s, 240s, 480s) | PAUSE enrollment (not BOUNCED) | Recruiter can investigate + resume |
-| `send_sequence_email` (auth error) | 0 | None | Pause ALL enrollments, flag in Settings | Grant revoked — retrying won't help |
-| `classify_reply` | 3 | Exponential (10s, 30s, 90s) | Log warning, leave sentiment null | Non-critical — recruiter can read the reply |
-| `extract_referral` | 2 | Fixed 10s | Log warning, skip extraction | Lower priority, can fail gracefully |
-| `update_enrollment_on_reply` | 3 | Immediate | Alert — critical failure | Must not lose reply state |
+| Task | Error Type | Max Retries | Backoff | On exhaustion |
+|------|-----------|-------------|---------|---------------|
+| `send_sequence_email` | `RateLimitError` (429) | Unlimited | Retry-After header or exponential (30s, 60s, 120s) | N/A — always resolves |
+| `send_sequence_email` | `TransientError` (5xx/timeout) | 5 | Exponential (30s→480s) | `enrollment_service.mark_paused(enrollment_id)` |
+| `send_sequence_email` | `PermanentError` (auth revoked) | 0 | None | `enrollment_service.pause_all_for_account(account_id)` + surface in Settings UI |
+| `classify_reply` | Any error | 3 | Exponential (10s, 30s, 90s) | Leave sentiment null. Non-critical — recruiter reads the reply. |
+| `extract_referral` | Any error | 2 | Fixed 10s | Log warning, skip extraction. Lower priority. |
+| `update_enrollment_on_reply` | Any error | 3 | Immediate | Alert — critical failure. Must not lose reply state. |
 
 ### Idempotency
 
-Every task checks preconditions before executing:
+Every task's service method checks preconditions before executing:
 
-- `send_sequence_email`: checks enrollment.status == ACTIVE before sending. If status changed (e.g., candidate replied between scheduling and execution), task exits without sending.
-- `update_enrollment_on_reply`: checks status is not already REPLIED/OPTED_OUT/BOUNCED. Prevents double processing.
-- `classify_reply`: checks email_event.sentiment is null. If already classified (duplicate webhook), skips.
+- `advance_step()`: checks `enrollment.status == ACTIVE`. If status changed (candidate replied between scheduling and execution), returns early without sending.
+- `mark_replied()`: checks status is not already REPLIED/OPTED_OUT/BOUNCED. Prevents double processing.
+- `classify()`: checks `email_event.sentiment is null`. If already classified (duplicate webhook), skips.
 
-This is critical because at scale, duplicate task execution will happen (Celery at-least-once delivery). Every task must be safe to run twice.
+Critical because Celery uses at-least-once delivery. Duplicate task execution will happen at scale. Every service method must be safe to call twice.
+
+### Celery Configuration
+
+Essential settings for production reliability:
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `acks_late` | `True` (critical tasks) | Task survives worker crash — redelivered on restart |
+| `soft_time_limit` | `60s` (send), `30s` (classify) | Prevents hanging Nylas/OpenAI calls from blocking workers forever |
+| `worker_prefetch_multiplier` | `1` | Prevents workers from hoarding tasks with variable execution times |
+| `broker_transport_options.visibility_timeout` | `7200` | Prevents Redis from redelivering long-running retry tasks |
+
+**Webhook deduplication:** Add a unique constraint on `email_events.nylas_message_id`. The webhook handler checks for existing events before dispatching tasks. Duplicate webhooks return 200 immediately.
 
 ---
 
