@@ -1,6 +1,6 @@
 # Jooba — Claude Code context
 
-Take-home: recruiter outreach (sequences, CSV enroll, Nylas, LLM classification). **Authoritative architecture:** `docs/architecture/architecture.md`. This file replaces the old `AGENTS.md` — preferences and workspace facts live here.
+Take-home: recruiter outreach (sequences, CSV enroll, Nylas, LLM classification). **Authoritative architecture:** `docs/architecture/architecture.md`. Standing preferences and workspace facts are in the sections below; use this file as the project memory for Claude.
 
 ## Learned user preferences
 
