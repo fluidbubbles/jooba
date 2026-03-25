@@ -205,31 +205,58 @@ EmailEventRepository
 └── ...
 ```
 
+Repositories participate in the caller's transaction (see Section 3, Transaction Boundaries).
+
 **Benefit**: If the dashboard analytics query is slow, you optimize it in one place — the repository. No service code changes.
 
 ### 4.2 Service Layer Pattern
 
 Services own all business rules. A service method reads like a description of what should happen.
 
+**EnrollmentService:**
+
 ```
 EnrollmentService
-├── enroll_candidates(sequence_id, candidates_csv)
-│   → parse CSV, deduplicate by email, create candidates,
+├── enroll_candidates(sequence_id, candidates: list[CandidateInput])
+│   → deduplicate by email, get-or-create candidates,
 │     create enrollments, generate unsubscribe tokens,
-│     compute initial next_send_at, log transitions
+│     compute next_send_at, log transitions
+│   (receives structured data from API layer, NOT raw CSV)
 │
 ├── advance_step(enrollment_id)
-│   → send current step email, increment current_step,
-│     compute next next_send_at or mark completed,
-│     log transition
+│   → _validate_sendable(enrollment)      — check status == ACTIVE
+│   → _compose_email(enrollment)          — template replacement + footer
+│   → email_sender.send(composed)         — integration call
+│   → _record_email_event(enrollment, result)
+│   → _advance_or_complete(enrollment)    — increment step or mark COMPLETED
+│   → _log_transition(enrollment, "email_sent")
 │
 ├── mark_replied(enrollment_id)
-│   → set status to REPLIED, clear next_send_at,
-│     cancel all pending sends, log transition
+│   → set status REPLIED, clear next_send_at, log transition
 │
-└── opt_out(unsubscribe_token)
-    → validate token, set status to OPTED_OUT,
-      clear next_send_at, log transition
+├── opt_out(unsubscribe_token)
+│   → validate HMAC token, set OPTED_OUT, clear next_send_at, log transition
+│
+└── set_nudge(enrollment_id, delay_minutes)
+    → compute nudge_due_at, save, log transition
+```
+
+**EmailService:**
+
+```
+EmailService
+├── process_webhook(data)
+│   → _match_to_enrollment(thread_id, sender_email)
+│   → _determine_direction(sender_email, account_email)
+│   → if OUTBOUND: _record_external_reply() + _set_nudge_timer()
+│   → if INBOUND: _record_inbound() + _dispatch_classification()
+│
+├── send_manual_reply(email_event_id, body_html, nudge_delay)
+│   → load thread context, append unsubscribe footer,
+│     send via integration, record event, set nudge timer
+│
+└── compose(step, candidate)
+    → replace {{placeholders}}, append unsubscribe footer
 ```
 
 ### 4.3 State Machine Pattern
@@ -239,37 +266,34 @@ Enrollment status transitions are explicit and validated. Not every transition i
 ```
 Valid transitions:
 
-ACTIVE → REPLIED            (candidate replied)
-ACTIVE → COMPLETED          (all steps sent, no reply)
-ACTIVE → BOUNCED            (bounce webhook — recipient server rejected)
-ACTIVE → PAUSED             (transient send failures after max retries)
-ACTIVE → OPTED_OUT          (clicked unsubscribe)
+ACTIVE → REPLIED        (candidate replied)
+ACTIVE → COMPLETED      (all steps sent, no reply)
+ACTIVE → BOUNCED        (bounce webhook — recipient server rejected)
+ACTIVE → PAUSED         (transient send failures after max retries)
+ACTIVE → OPTED_OUT      (clicked unsubscribe)
 
-Invalid (should raise error):
+PAUSED → ACTIVE         (recruiter clicks Resume after investigating)
 
-REPLIED → ACTIVE             (can't un-reply)
-COMPLETED → ACTIVE           (can't restart completed sequence)
-OPTED_OUT → anything         (terminal state, period)
-BOUNCED → anything           (terminal state)
+Invalid (raise error):
 
-Resumable (recruiter action required):
-
-PAUSED → ACTIVE              (recruiter clicks Resume after investigating send failure)
+REPLIED → ACTIVE        (can't un-reply)
+COMPLETED → ACTIVE      (can't restart)
+OPTED_OUT → anything    (terminal)
+BOUNCED → anything      (terminal)
 ```
 
-The service layer validates transitions before applying them. If code tries an invalid transition, it raises an error rather than silently corrupting state.
+The service layer validates transitions before applying them. If code tries an invalid transition, it raises an error rather than silently corrupting state. Terminal states (REPLIED, COMPLETED, OPTED_OUT, BOUNCED) have no outbound transitions — they are final.
 
 ### 4.4 Strategy Pattern (Integrations)
 
 External APIs are behind interfaces. The service layer doesn't know or care which provider is behind them.
 
 ```
-ClassificationService uses a Classifier interface:
+Classifier interface:
 ├── OpenAIClassifier (production) — calls GPT-4o-mini
-├── AnthropicClassifier (alternative) — calls Haiku
 └── MockClassifier (testing) — returns deterministic results
 
-EmailSender uses a Sender interface:
+Sender interface:
 ├── NylasSender (production) — sends through connected email account
 └── MockSender (testing) — logs emails without sending
 ```
@@ -280,27 +304,123 @@ Swapping providers = changing an environment variable. No code changes.
 # config.py
 class Settings(BaseSettings):
     email_provider: str = Field(default="nylas")      # nylas | mock
-    llm_provider: str = Field(default="openai")        # openai | anthropic | mock
+    llm_provider: str = Field(default="openai")        # openai | mock
 ```
 
 The app bootstraps the correct implementation at startup based on these values. The service layer receives a `Classifier` and `Sender` interface — it never imports `openai` or `nylas` directly.
 
 ### 4.5 Observer Pattern (via Celery Tasks)
 
-When something happens (email received, enrollment status changed), the system dispatches Celery tasks instead of handling everything inline. Each task is an independent "observer" that reacts to the event.
+When something happens (email received, reply classified), the system dispatches Celery tasks instead of handling everything inline. Each task is an independent "observer" that reacts to the event.
 
 ```
 "Inbound email received" triggers:
-├── Task: classify_reply          (calls OpenAI, saves sentiment)
-├── Task: update_enrollment       (marks as replied, cancels follow-ups)
-└── Task: log_state_transition    (writes audit log)
+├── Task: classify_reply          (calls classification service)
+└── Task: update_enrollment       (calls enrollment_service.mark_replied)
 
 "Reply classified as referral" triggers:
-├── Task: extract_referral        (calls OpenAI, creates referred candidate)
-└── Task: auto_enroll_referral    (enrolls referred person in referral sequence)
+└── Task: extract_referral        (calls referral_service.process_referral)
 ```
 
 Adding a new reaction (e.g., "send Slack notification on interested reply") means adding one new task. Zero changes to existing code.
+
+**Parallel dispatch safety:** `classify_reply` and `update_enrollment_on_reply` run in parallel. This is safe because all downstream classification tasks operate on the `email_event_id`, not the enrollment status. If a future classification category requires keeping the enrollment ACTIVE (not REPLIED), the flow must change to sequential: classify first, then conditionally update.
+
+### 4.6 Concurrency Control
+
+#### Scheduler Claim Pattern
+
+The periodic `send_due_emails` task atomically claims enrollments before dispatching individual send tasks. This prevents overlapping scheduler cycles from dispatching duplicate tasks for the same enrollment.
+
+```sql
+UPDATE enrollments
+SET next_send_at = NULL
+WHERE id IN (
+    SELECT id FROM enrollments
+    WHERE status = 'active' AND next_send_at <= now()
+    FOR UPDATE SKIP LOCKED
+    LIMIT 100
+)
+RETURNING id
+```
+
+Claimed enrollments have `next_send_at = NULL`, so the next scheduler cycle skips them. If the send task fails, `enrollment_service.advance_step()` sets `next_send_at` back to a retry time. Requires PostgreSQL (`FOR UPDATE SKIP LOCKED`).
+
+#### Send Deduplication
+
+The Nylas API send and the database write cannot be in the same transaction. If the worker crashes after sending but before recording the email event, a retry would send again.
+
+Mitigation: Before calling Nylas, write a `send_attempt` record (enrollment_id, step_index) in the database. On retry, check if an attempt exists for this enrollment+step. If yes, query Nylas for the message (by thread) to confirm delivery before re-sending. This is an edge case (worker crash between external call and DB write) but is documented for implementer awareness.
+
+### 4.7 Centralized Enums
+
+All status and sentiment values are defined in one file: `app/models/enums.py`. Every layer imports from this single source of truth.
+
+```python
+class EnrollmentStatus(str, Enum):
+    ACTIVE = "active"
+    REPLIED = "replied"
+    COMPLETED = "completed"
+    BOUNCED = "bounced"
+    OPTED_OUT = "opted_out"
+    PAUSED = "paused"
+
+class Sentiment(str, Enum):
+    INTERESTED = "interested"
+    NOT_INTERESTED = "not_interested"
+    REFERRAL = "referral"
+    NEUTRAL = "neutral"
+
+class SequenceStatus(str, Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ARCHIVED = "archived"
+
+VALID_TRANSITIONS = {
+    EnrollmentStatus.ACTIVE: [
+        EnrollmentStatus.REPLIED,
+        EnrollmentStatus.COMPLETED,
+        EnrollmentStatus.BOUNCED,
+        EnrollmentStatus.OPTED_OUT,
+        EnrollmentStatus.PAUSED,
+    ],
+    EnrollmentStatus.PAUSED: [EnrollmentStatus.ACTIVE],
+    # All others are terminal — empty list means no outbound transitions
+}
+```
+
+Adding a new status or sentiment = add it to the enum here. The service layer's state machine validation, the Pydantic schemas, and the frontend filters all derive from these definitions.
+
+### 4.8 Task Dispatcher
+
+Services dispatch async work through a `TaskDispatcher` interface, not by calling Celery tasks directly. This decouples business logic from the task queue implementation.
+
+```python
+class TaskDispatcher:
+    def dispatch(self, task_name: str, *args, **kwargs) -> None: ...
+
+class CeleryDispatcher(TaskDispatcher):
+    """Production — dispatches to Celery queues."""
+    def dispatch(self, task_name, *args, **kwargs):
+        task = celery_app.tasks[task_name]
+        task.delay(*args, **kwargs)
+
+class SyncDispatcher(TaskDispatcher):
+    """Testing — executes task function immediately, no queue."""
+    def dispatch(self, task_name, *args, **kwargs):
+        task_registry[task_name](*args, **kwargs)
+```
+
+Services receive a `TaskDispatcher` via constructor injection:
+
+```python
+# In email_service.process_webhook():
+self.dispatcher.dispatch("classify_reply", email_event_id)
+self.dispatcher.dispatch("update_enrollment_on_reply", email_event_id)
+```
+
+Replacing Celery with Dramatiq or ARQ = write a new dispatcher implementation (1 file change).
 
 ---
 
