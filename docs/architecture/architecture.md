@@ -80,9 +80,6 @@ Each layer has exactly one responsibility. No layer skips a level.
 │  service, return response. No business logic. No SQL.       │
 │  No external API calls.                                     │
 │                                                             │
-│  Knows about: Pydantic schemas, service layer               │
-│  Does NOT know about: SQLAlchemy, Nylas SDK, OpenAI SDK     │
-│                                                             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  SERVICE LAYER                                              │
@@ -92,10 +89,6 @@ Each layer has exactly one responsibility. No layer skips a level.
 │  "What are the rules for advancing a sequence step?"        │
 │  "Which replies need recruiter attention?"                   │
 │                                                             │
-│  Knows about: Repositories, integration interfaces,         │
-│  Celery tasks (for dispatching async work)                  │
-│  Does NOT know about: FastAPI, HTTP, request/response       │
-│                                                             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  REPOSITORY LAYER                                           │
@@ -103,9 +96,6 @@ Each layer has exactly one responsibility. No layer skips a level.
 │  Responsibility: Data access. All SQL queries live here.    │
 │  One repository per aggregate root (Sequence, Enrollment,   │
 │  Candidate, EmailEvent).                                    │
-│                                                             │
-│  Knows about: SQLAlchemy models, database session           │
-│  Does NOT know about: Business rules, external APIs         │
 │                                                             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
@@ -117,28 +107,76 @@ Each layer has exactly one responsibility. No layer skips a level.
 │  - NylasClient: send_email, get_auth_url, exchange_token    │
 │  - OpenAIClient: classify_reply, extract_referral_info      │
 │                                                             │
-│  Knows about: Nylas SDK, OpenAI SDK, HTTP                   │
-│  Does NOT know about: Database, business rules              │
-│                                                             │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  TASK LAYER (Celery)                                        │
 │                                                             │
-│  Responsibility: Async execution of side effects.           │
-│  Each task does one thing. Tasks can chain other tasks.     │
-│  Built-in retry with backoff on failure.                    │
+│  Responsibility: Async invocation + retry policy.           │
+│  Thin wrappers that call services. Each task does one       │
+│  thing. Built-in retry with backoff on failure.             │
 │                                                             │
-│  Knows about: Services, repositories, integrations          │
-│  Does NOT know about: FastAPI, HTTP                         │
+│  Knows about: Services only                                 │
+│  Does NOT know about: Repositories, Integrations,           │
+│  FastAPI, HTTP                                              │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+| Layer | Responsibility | Knows About | Does NOT Know About |
+|-------|---------------|-------------|---------------------|
+| API | HTTP in/out, request validation, error mapping | Pydantic schemas, Services | SQLAlchemy, Nylas, OpenAI, Celery |
+| Service | Business rules, orchestration, transaction boundary | Repositories, Integration interfaces, Task dispatcher | FastAPI, HTTP, Celery internals |
+| Repository | Data access, all SQL queries | SQLAlchemy, DB session | Business rules, external APIs |
+| Integration | Wrap external APIs behind clean interfaces | External SDKs (Nylas, OpenAI) | Database, business rules |
+| Task | Async invocation + retry policy | Services only | Repositories, Integrations, FastAPI, HTTP |
+
+### Transaction Boundaries
+
+Each service method is one database transaction:
+
+- Opened at service method entry, committed on success, rolled back on exception
+- Repository methods participate in the caller's transaction — they do not manage their own commits
+- Celery tasks inherit this: one task invocation = one service call = one transaction
+- State transition logging happens synchronously inside the same transaction as the state change — never as a separate async task
+
+This means: if `enrollment_service.advance_step()` sends an email, records the event, and updates the enrollment status, all database writes are atomic. If any step fails, they all roll back. (The external Nylas send cannot be rolled back — see Section 4.6 for the send deduplication strategy.)
+
+### Error Response Contract
+
+Services raise domain-specific exceptions. The API layer maps them to HTTP status codes:
+
+| Exception | HTTP Status | When |
+|-----------|-------------|------|
+| `CandidateNotFound` | 404 | Lookup by ID/email fails |
+| `SequenceNotFound` | 404 | Lookup by ID fails |
+| `InvalidStateTransition` | 409 Conflict | E.g., trying to activate an already-active sequence |
+| `EnrollmentNotActive` | 409 Conflict | Trying to send to a non-active enrollment |
+| `ProviderRateLimited` | 503 Service Unavailable | Nylas/OpenAI rate limit (in API context) |
+| `ProviderAuthError` | 503 Service Unavailable | Nylas grant revoked |
+
+All error responses follow a consistent shape:
+
+```json
+{"error": "Human-readable message", "code": "ENROLLMENT_NOT_ACTIVE"}
+```
+
+FastAPI exception handlers in `main.py` map service exceptions to HTTP responses. Services never import or return HTTP concepts.
+
+### Dependency Injection
+
+- **API layer:** FastAPI `Depends()` provides services and DB sessions to route handlers
+- **Celery tasks:** Services are instantiated at task execution time with a fresh DB session
+- **Services:** Receive repositories and integration clients via constructor injection
+- **Testing:** Swap real repos/integrations for mocks via constructor — no monkey-patching needed
+
+This is how the Strategy Pattern (Section 4.4) actually works in practice: the app bootstraps the correct integration implementation based on config, then injects it into services.
+
 **Why this separation matters:**
 
-- **Testability**: Mock the repository layer → test services without a database. Mock integrations → test without hitting Nylas/OpenAI.
-- **Swappability**: Replace OpenAI with Anthropic → change one file in integrations. Replace Nylas with SendGrid → same.
-- **Readability**: "Where does the enrollment state machine logic live?" → `services/enrollment_service.py`. Always. Not scattered across 5 route handlers.
+- **Testability**: Mock the repository layer to test services without a database. Mock integrations to test without hitting Nylas/OpenAI. Tasks are thin wrappers calling services, making them trivially testable — just verify they invoke the right service method with the right args.
+- **Swappability**: Replace OpenAI with Anthropic — change one file in integrations. Replace Nylas with SendGrid — same.
+- **Readability**: "Where does the enrollment state machine logic live?" Always `services/enrollment_service.py`. Not scattered across 5 route handlers or buried in Celery task files.
+- **Safety**: Tasks only call services, so all business rules and transaction boundaries are enforced regardless of whether the entry point is an HTTP request or an async task.
 
 ---
 
