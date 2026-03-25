@@ -66,6 +66,41 @@ Vite proxies `/api` and `/health` to `VITE_DEV_PROXY_TARGET` (Compose sets `http
 - **Postgres:** Published as `127.0.0.1:5432:5432` only.
 - **README.md** env snippet may show `postgresql://` for DB; backend Settings expect **`+asyncpg`** — align when debugging connection errors.
 
+## Universal implementation rules
+
+Use these defaults unless the user explicitly overrides. These rules apply to all plans and phases:
+
+- **API/Service/Repository boundaries:** Routes stay thin, services own business rules/state transitions, repositories own DB queries.
+- **Domain exception flow:** Raise typed domain errors from services and map them in API exception handlers with stable `code` values.
+- **Frontend API client:** Reuse `apiFetch` in `frontend/src/lib/api.ts`; avoid introducing duplicate request wrappers.
+- **`EmptyState` contract:** Keep `EmptyState` as the default export with `icon: LucideIcon` (do not mix competing icon prop APIs).
+- **Route replacement rule:** When implementing pages in `frontend/src/App.tsx`, replace placeholder routes instead of adding duplicate paths.
+- **Sequence step invariant:** First step must always have `delay_minutes = 0`; if steps are removed/reordered, normalize before submit.
+- **Aggregation query rule:** Count concrete columns (for example `SequenceStep.id`), not relationship attributes; avoid N+1 loops for list counters.
+- **Testing rule:** API integration tests must run with an isolated DB dependency override/fixture; service tests should assert behaviors and exception paths, not only constants.
+
+## Package-level CLAUDE.md policy
+
+- Keep local `CLAUDE.md` files in package directories concise and domain-specific.
+- Parent `CLAUDE.md` instructions still apply; local files add constraints for that package only.
+- Update package files when responsibilities or contracts change in that package.
+
+## Working in package folders
+
+- When working inside a package folder, read the nearest `CLAUDE.md` first, then parent `CLAUDE.md` files up to repo root.
+- For backend edits, consult `backend/CLAUDE.md` plus the relevant `backend/app/<package>/CLAUDE.md` (`api`, `core`, `models`, `schemas`, `services`).
+- Use package `CLAUDE.md` files for local architecture decisions; use root `CLAUDE.md` for cross-cutting rules.
+
+## Brief note on current setup
+
+- Backend package `CLAUDE.md` files are now aligned to `docs/architecture/architecture.md` by layer:
+  - `api`: HTTP boundary + error mapping contract
+  - `core`: configuration/DI/provider wiring
+  - `models`: relationships/enums/index and constraint intent
+  - `schemas`: contract shape vs business-rule split
+  - `services`: workflows, transaction boundaries, state machine, dispatcher usage
+- This keeps agent guidance local to each package while remaining consistent with root rules.
+
 ## Optional local overrides
 
 Use **`.claude.local.md`** at repo root for personal notes (gitignore it if sharing the repo).
