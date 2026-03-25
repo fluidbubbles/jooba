@@ -28,10 +28,10 @@ class SequenceService:
     def __init__(self, repo: SequenceRepository) -> None:
         self._repo = repo
 
-    async def _reload_sequence(self, sequence_id: uuid.UUID, *, missing_message: str) -> Sequence:
+    async def _reload_sequence(self, sequence_id: uuid.UUID) -> Sequence:
         reloaded = await self._repo.get_by_id(sequence_id)
         if reloaded is None:
-            raise RuntimeError(missing_message)
+            raise SequenceNotFound(sequence_id)
         return reloaded
 
     def _validate_steps(self, steps: list[StepInput]) -> None:
@@ -77,9 +77,7 @@ class SequenceService:
             status=SequenceStatus.DRAFT.value,
         )
         await self._repo.create_steps(seq.id, self._step_payloads(data.steps))
-        return await self._reload_sequence(
-            seq.id, missing_message="Sequence missing immediately after create"
-        )
+        return await self._reload_sequence(seq.id)
 
     async def get(self, sequence_id: uuid.UUID) -> Sequence:
         seq = await self._repo.get_by_id(sequence_id)
@@ -104,9 +102,7 @@ class SequenceService:
             self._validate_steps(data.steps)
             await self._repo.replace_steps(sequence_id, self._step_payloads(data.steps))
 
-        return await self._reload_sequence(
-            sequence_id, missing_message="Sequence missing after update"
-        )
+        return await self._reload_sequence(sequence_id)
 
     async def change_status(
         self, sequence_id: uuid.UUID, new_status: SequenceStatus
@@ -119,6 +115,4 @@ class SequenceService:
         if new_status is SequenceStatus.ACTIVE:
             self._validate_steps(self._steps_for_validation(seq))
         await self._repo.update(seq, status=new_status.value)
-        return await self._reload_sequence(
-            sequence_id, missing_message="Sequence missing after status change"
-        )
+        return await self._reload_sequence(sequence_id)

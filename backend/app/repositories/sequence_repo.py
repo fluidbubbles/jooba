@@ -12,6 +12,7 @@ from sqlalchemy.sql.selectable import Subquery
 from app.models.enrollment import Enrollment
 from app.models.enums import EnrollmentStatus
 from app.models.sequence import Sequence, SequenceStep
+from app.services.exceptions import InvalidSequenceData
 
 
 def _count_by_sequence_subquery(
@@ -121,7 +122,7 @@ class SequenceRepository:
         column_keys = {attr.key for attr in class_mapper(Sequence).column_attrs}
         unknown = sorted(name for name in kwargs if name not in column_keys)
         if unknown:
-            raise ValueError(
+            raise InvalidSequenceData(
                 "Unknown fields for Sequence update: " + ", ".join(unknown)
             )
         for key, value in kwargs.items():
