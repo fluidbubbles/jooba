@@ -1,6 +1,17 @@
 # Jooba — Claude Code context
 
-Take-home: recruiter outreach (sequences, CSV enroll, Nylas, LLM classification). **Authoritative architecture:** `docs/architecture/architecture.md`. **User/plan prefs:** `AGENTS.md`.
+Take-home: recruiter outreach (sequences, CSV enroll, Nylas, LLM classification). **Authoritative architecture:** `docs/architecture/architecture.md`. This file replaces the old `AGENTS.md` — preferences and workspace facts live here.
+
+## Learned user preferences
+
+- When building prioritized delivery or feature task lists, frame each item as a full-stack vertical slice (UI through API, services, and repositories); acceptance criteria should verify backend behavior and data, not only what appears in the browser.
+- Treat `docs/architecture/architecture.md` as the source of truth when product screens or exported mockups disagree; align Pencil designs and mockup PNGs to the architecture rather than the other way around.
+- When the user scopes work as “Pencil only,” keep changes in the Pencil / `.pen` workflow and avoid editing application frontend code unless they expand the scope.
+
+## Learned workspace facts
+
+- Primary architecture spec: `docs/architecture/architecture.md`. Mockup screenshots: `docs/screenshots/mockups/`. Superpowers plans/specs live under `docs/superpowers/`; high-level phase summaries under `docs/summaries/`.
+- Product UI design file in the repo: `pencil-new.pen` at the project root; use Pencil MCP tools for `.pen` design work when the editor encrypts or gates file access.
 
 ## Quick start (full stack)
 
