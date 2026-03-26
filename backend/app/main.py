@@ -7,6 +7,7 @@ from app.api.health import router as health_router
 from app.api.nylas import router as nylas_router
 from app.api.sequences import router as sequences_router
 from app.api.unsubscribe import router as unsubscribe_router
+from app.api.webhooks import router as webhooks_router
 
 app = FastAPI(title="Jooba", description="Recruiter outreach automation")
 
@@ -25,3 +26,4 @@ app.include_router(sequences_router)
 app.include_router(enrollments_router)
 app.include_router(nylas_router)
 app.include_router(unsubscribe_router)
+app.include_router(webhooks_router)
