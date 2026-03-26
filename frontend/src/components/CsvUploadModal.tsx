@@ -1,0 +1,240 @@
+import { useCallback, useRef, useState } from 'react'
+import { AlertTriangle, Upload, X } from 'lucide-react'
+import Papa from 'papaparse'
+import { api, ApiRequestError } from '../lib/api'
+import type { CandidateInput, EnrollResponse } from '../lib/types'
+
+interface Props {
+  sequenceId: string
+  onClose: () => void
+  onEnrolled: (result: EnrollResponse) => void
+}
+
+type ParsedRow = CandidateInput & { _error?: string }
+
+const ALIAS_MAP: Record<string, string[]> = {
+  email: ['email', 'e-mail', 'email_address', 'emailaddress'],
+  first_name: ['first_name', 'firstname', 'first'],
+  last_name: ['last_name', 'lastname', 'last'],
+  company: ['company', 'organization', 'org'],
+  title: ['title', 'job_title', 'jobtitle', 'position'],
+}
+
+function findColumn(row: Record<string, string>, fields: string[], aliases: string[]): string | null {
+  for (const alias of aliases) {
+    const match = fields.find((f) => f.toLowerCase().trim() === alias)
+    if (match && row[match]?.trim()) return row[match].trim()
+  }
+  return null
+}
+
+export function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
+  const [candidates, setCandidates] = useState<ParsedRow[]>([])
+  const [fileName, setFileName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [enrolling, setEnrolling] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const parseFile = useCallback((file: File) => {
+    setError(null)
+    setFileName(file.name)
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const fields = results.meta.fields || []
+
+        const emailCol = fields.find((f) =>
+          ALIAS_MAP.email.includes(f.toLowerCase().trim()),
+        )
+
+        if (!emailCol) {
+          setError(
+            `Could not find an "email" column. Found columns: ${fields.join(', ') || 'none'}`,
+          )
+          return
+        }
+
+        const rows: ParsedRow[] = []
+        for (const row of results.data as Record<string, string>[]) {
+          const email = row[emailCol]?.trim()
+          if (!email) continue
+
+          rows.push({
+            email,
+            first_name: findColumn(row, fields, ALIAS_MAP.first_name) || undefined,
+            last_name: findColumn(row, fields, ALIAS_MAP.last_name) || undefined,
+            company: findColumn(row, fields, ALIAS_MAP.company) || undefined,
+            title: findColumn(row, fields, ALIAS_MAP.title) || undefined,
+          })
+        }
+
+        if (rows.length === 0) {
+          setError('No valid rows found. Make sure the CSV has at least one row with an email.')
+          return
+        }
+
+        setCandidates(rows)
+      },
+      error: () => {
+        setError('Could not parse this file. Make sure it is a valid CSV.')
+      },
+    })
+  }, [])
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      const file = e.dataTransfer.files[0]
+      if (file) parseFile(file)
+    },
+    [parseFile],
+  )
+
+  const handleEnroll = async () => {
+    setEnrolling(true)
+    setError(null)
+    try {
+      const result = await api.enrollments.enroll(sequenceId, candidates)
+      onEnrolled(result)
+    } catch (err: unknown) {
+      console.error('Failed to enroll candidates:', err)
+      setError(err instanceof ApiRequestError ? err.message : 'Failed to enroll candidates')
+      setEnrolling(false)
+    }
+  }
+
+  const reset = () => {
+    setCandidates([])
+    setFileName('')
+    setError(null)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <h2 className="text-lg font-semibold text-gray-900">Enroll Candidates</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 transition-colors hover:text-gray-600"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {error && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-500" />
+              <div>
+                <p className="text-sm text-red-800">{error}</p>
+                {candidates.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={reset}
+                    className="mt-1 text-sm text-red-600 underline"
+                  >
+                    Try Another File
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {candidates.length === 0 && !error && (
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              onClick={() => fileRef.current?.click()}
+              className="cursor-pointer rounded-xl border-2 border-dashed border-gray-300 p-10 text-center transition-colors hover:border-blue-400"
+            >
+              <Upload size={32} className="mx-auto mb-3 text-gray-400" />
+              <p className="mb-1 text-gray-700">Drag & drop a CSV file here</p>
+              <p className="text-sm text-gray-500">or click to browse</p>
+              <p className="mt-4 text-xs text-gray-400">
+                Expected columns: email (required), first_name, last_name, company, title
+              </p>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) parseFile(file)
+                }}
+              />
+            </div>
+          )}
+
+          {candidates.length > 0 && (
+            <div>
+              <p className="text-sm text-gray-600">
+                Parsed{' '}
+                <span className="font-medium text-gray-900">{candidates.length}</span>{' '}
+                candidates from &quot;{fileName}&quot;
+              </p>
+
+              <div className="mt-3 overflow-hidden rounded-lg border border-gray-200">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Email</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">First</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Last</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Company</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Title</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {candidates.slice(0, 5).map((c, i) => (
+                      <tr key={i}>
+                        <td className="px-4 py-2 text-gray-900">{c.email}</td>
+                        <td className="px-4 py-2 text-gray-500">{c.first_name || '\u2014'}</td>
+                        <td className="px-4 py-2 text-gray-500">{c.last_name || '\u2014'}</td>
+                        <td className="px-4 py-2 text-gray-500">{c.company || '\u2014'}</td>
+                        <td className="px-4 py-2 text-gray-500">{c.title || '\u2014'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {candidates.length > 5 && (
+                  <div className="border-t border-gray-200 px-4 py-2 text-xs text-gray-400">
+                    ... {candidates.length - 5} more
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {candidates.length > 0 && (
+          <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-6 py-4">
+            <button
+              type="button"
+              onClick={reset}
+              className="px-4 py-2 text-sm text-gray-600 transition-colors hover:text-gray-900"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleEnroll}
+              disabled={enrolling}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-40"
+            >
+              {enrolling ? 'Enrolling...' : `Enroll ${candidates.length}`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
