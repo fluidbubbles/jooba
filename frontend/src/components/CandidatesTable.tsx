@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Upload } from 'lucide-react'
 import { api } from '../lib/api'
 import type { EnrollmentListItem, EnrollmentStatus, Sentiment } from '../lib/types'
@@ -37,21 +37,24 @@ export default function CandidatesTable({ sequenceId, onUploadCsv, refreshKey }:
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
 
-  useEffect(() => {
+  const loadEnrollments = useCallback(async () => {
     setLoading(true)
     const status = statusFilter === 'all' ? undefined : (statusFilter as EnrollmentStatus)
-    api.enrollments
-      .list(sequenceId, status, PAGE_SIZE, page * PAGE_SIZE)
-      .then((data) => {
-        setEnrollments(data.items)
-        setTotal(data.total)
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error('Failed to load enrollments:', err)
-        setLoading(false)
-      })
-  }, [sequenceId, statusFilter, page, refreshKey])
+    try {
+      const data = await api.enrollments.list(sequenceId, status, PAGE_SIZE, page * PAGE_SIZE)
+      setEnrollments(data.items)
+      setTotal(data.total)
+    } catch (err) {
+      console.error('Failed to load enrollments:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [sequenceId, statusFilter, page])
+
+  useEffect(() => {
+    void loadEnrollments()
+    // refreshKey is a cache-buster: the parent increments it to trigger a re-fetch
+  }, [loadEnrollments, refreshKey])
 
   if (loading && enrollments.length === 0) {
     return <div className="text-sm text-gray-500">Loading...</div>
@@ -81,6 +84,7 @@ export default function CandidatesTable({ sequenceId, onUploadCsv, refreshKey }:
             setStatusFilter(e.target.value)
             setPage(0)
           }}
+          aria-label="Filter by status"
           className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 focus:border-blue-500 focus:outline-none"
         >
           {STATUS_OPTIONS.map((opt) => (
@@ -128,7 +132,7 @@ export default function CandidatesTable({ sequenceId, onUploadCsv, refreshKey }:
                     <span className="inline-flex items-center gap-1.5 text-xs text-gray-700">
                       <span
                         className={`h-2 w-2 rounded-full ${SENTIMENT_DOTS[e.sentiment]}`}
-                        aria-hidden
+                        aria-hidden="true"
                       />
                       {e.sentiment.replace('_', ' ')}
                     </span>
