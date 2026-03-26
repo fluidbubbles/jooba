@@ -33,9 +33,9 @@ Optional: copy root `.env.example` → `.env` to override DB/redis URLs (default
 ## Layout
 
 ```
-backend/app/          # FastAPI app — main.py, core/config, database, models, api/
+backend/app/          # FastAPI app — main.py, core/config, database, models/, api/, services/, repositories/, schemas/
 backend/alembic/      # Migrations (async env uses settings.database_url)
-frontend/src/         # React — components/, pages/, lib/api.ts
+frontend/src/         # React — pages/, components/, lib/api.ts + types.ts
 docs/architecture/    # System design
 docs/superpowers/plans/  # Implementation plans (Plan 1 = infra shell)
 pencil-new.pen        # UI design (use Pencil MCP; do not Read raw .pen as text)
@@ -68,12 +68,14 @@ Vite proxies `/api` and `/health` to `VITE_DEV_PROXY_TARGET` (Compose sets `http
 - **Redis:** No host port in Compose (avoids conflict with a local Redis on 6379); backend uses `redis:6379` on the internal network.
 - **Postgres:** Published as `127.0.0.1:5432:5432` only.
 - **README.md** env snippet may show `postgresql://` for DB; backend Settings expect **`+asyncpg`** — align when debugging connection errors.
+- **API integration tests:** `tests/test_sequences_api.py` needs `TEST_DATABASE_URL` (see `backend/CLAUDE.md` for the Compose one-liner and truncate safety flag).
 
 ## Universal implementation rules
 
 Use these defaults unless the user explicitly overrides. These rules apply to all plans and phases:
 
 - **API/Service/Repository boundaries:** Routes stay thin, services own business rules/state transitions, repositories own DB queries.
+- **Repository purity:** Repositories must not import `app.services` or raise service-layer domain exceptions; use `ValueError` (or similar) for invalid persistence arguments and map to `DomainError` in the service when the API must return a stable `code`.
 - **Domain exception flow:** Raise typed domain errors from services and map them in API exception handlers with stable `code` values.
 - **Frontend API client:** Reuse `apiFetch` in `frontend/src/lib/api.ts`; avoid introducing duplicate request wrappers.
 - **`EmptyState` contract:** Keep `EmptyState` as the default export with `icon: LucideIcon` (do not mix competing icon prop APIs).
@@ -84,6 +86,9 @@ Use these defaults unless the user explicitly overrides. These rules apply to al
 - **Regression test rule:** When a bug or issue is identified, add a regression test that reproduces the failure. Then have subagents try to fix the bug and prove it with a passing test.
 - **No inline imports:** All imports must be at the top of the file. Never use inline/local imports inside functions or methods.
 - **No `from __future__ import annotations`:** The project targets Python 3.13+. PEP 604 unions (`X | Y`) and forward references work natively. Do not add `from __future__ import annotations`.
+- **Service DI:** Services receive repositories via constructor injection, not `AsyncSession`. The API dependency factory wires `Repository(db)` → `Service(repo)`. Services must not import SQLAlchemy.
+- **No union types for route dispatch:** Do not use `SchemaA | SchemaB` in FastAPI route parameters for implicit dispatch via `isinstance`. Use separate endpoints instead.
+- **No dead infrastructure:** Do not add DB columns, service methods, or config fields for features that have no consumer in the current plan. Add them when the consuming code is built.
 
 ## Package-level CLAUDE.md policy
 
