@@ -24,6 +24,7 @@ export default function InboxPage() {
   const [activeTab, setActiveTab] = useState('all')
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState<string | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
   const loadTokenRef = useRef(0)
   const detailTokenRef = useRef(0)
@@ -57,11 +58,15 @@ export default function InboxPage() {
 
   const fetchDetail = useCallback((id: string) => {
     const token = ++detailTokenRef.current
+    setDetailError(null)
     api.inbox.detail(id).then((data) => {
       if (detailTokenRef.current !== token) return
       setDetail(data)
     }).catch((err) => {
       console.error('Failed to load reply detail', err)
+      if (detailTokenRef.current === token) {
+        setDetailError('Failed to load thread. Click to retry.')
+      }
     })
   }, [])
 
@@ -204,6 +209,16 @@ export default function InboxPage() {
                   <p className="text-red-400 text-sm mt-2">{sendError}</p>
                 )}
                 <ReplyComposer onSend={handleSendReply} />
+              </div>
+            ) : detailError ? (
+              <div className="flex flex-col items-center justify-center h-full gap-2">
+                <p className="text-red-400 text-sm">{detailError}</p>
+                <button
+                  onClick={() => selectedId && fetchDetail(selectedId)}
+                  className="text-blue-400 text-sm hover:underline"
+                >
+                  Retry
+                </button>
               </div>
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500 text-sm">
