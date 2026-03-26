@@ -32,7 +32,13 @@ async def list_inbox_replies(
     ))
 
     return [
-        InboxReplyItem(**r, is_unreplied=UUID(r["id"]) in unreplied_ids)
+        InboxReplyItem(
+            **r,
+            candidate_name=format_candidate_name(
+                r["first_name"], r["last_name"], r["candidate_email"]
+            ),
+            is_unreplied=UUID(r["id"]) in unreplied_ids,
+        )
         for r in replies
     ]
 

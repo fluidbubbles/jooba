@@ -10,7 +10,6 @@ from app.models.email_event import EmailEvent
 from app.models.enrollment import Enrollment
 from app.models.enums import EmailDirection
 from app.models.sequence import Sequence
-from app.utils.formatting import format_candidate_name
 
 logger = logging.getLogger(__name__)
 
@@ -131,9 +130,8 @@ class EmailEventRepository:
                 "sentiment": row.sentiment,
                 "sentiment_reasoning": row.sentiment_reasoning,
                 "created_at": row.created_at,
-                "candidate_name": format_candidate_name(
-                    row.first_name, row.last_name, row.candidate_email
-                ),
+                "first_name": row.first_name,
+                "last_name": row.last_name,
                 "candidate_email": row.candidate_email,
                 "sequence_name": row.sequence_name,
             }

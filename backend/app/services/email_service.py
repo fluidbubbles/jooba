@@ -75,8 +75,14 @@ class EmailService:
         account_email = account.email.lower()
 
         if sender_email == account_email:
-            # Outbound — recruiter replied from their email client
-            await self._record_external_reply(enrollment, data)
+            await self._record_external_reply(
+                enrollment,
+                subject=subject,
+                body_html=body_html,
+                body_text=body_text,
+                message_id=message_id,
+                thread_id=thread_id,
+            )
             return
 
         # Inbound — candidate reply
@@ -102,7 +108,7 @@ class EmailService:
             queue="default",
         )
 
-    async def _match_to_enrollment(self, thread_id: str | None, sender_email: str):
+    async def _match_to_enrollment(self, thread_id: str | None, sender_email: str) -> Enrollment | None:
         """Match an incoming message to an enrollment.
 
         Try 1: thread_id match (most reliable — same email thread)
@@ -123,16 +129,25 @@ class EmailService:
 
         return None
 
-    async def _record_external_reply(self, enrollment: Enrollment, data: dict) -> None:
+    async def _record_external_reply(
+        self,
+        enrollment: Enrollment,
+        *,
+        subject: str,
+        body_html: str,
+        body_text: str,
+        message_id: str | None,
+        thread_id: str | None,
+    ) -> None:
         """Record an outbound reply the recruiter sent from their email client."""
         await self._event_repo.create(
             enrollment_id=enrollment.id,
             direction=EmailDirection.OUTBOUND,
-            subject=data.get("subject", ""),
-            body_html=data.get("body_html", ""),
-            body_text=data.get("body_text", ""),
-            nylas_message_id=data.get("message_id"),
-            nylas_thread_id=data.get("thread_id"),
+            subject=subject,
+            body_html=body_html,
+            body_text=body_text,
+            nylas_message_id=message_id,
+            nylas_thread_id=thread_id,
             is_manual_reply=False,
         )
 

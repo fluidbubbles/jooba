@@ -43,7 +43,9 @@ async def nylas_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     # Nylas v3 webhook payload — extract message data
     data = body.get("data", {})
     from_list = data.get("from", [])
-    sender_email = from_list[0].get("email", "") if from_list and isinstance(from_list, list) else ""
+    sender_email = ""
+    if isinstance(from_list, list) and from_list:
+        sender_email = from_list[0].get("email", "")
 
     message_data = {
         "message_id": data.get("id"),
