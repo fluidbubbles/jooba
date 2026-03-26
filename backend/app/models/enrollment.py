@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -26,6 +26,8 @@ class Enrollment(Base):
     next_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     unsubscribe_token: Mapped[str | None] = mapped_column(String(255), index=True)
+    nudge_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nudge_dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -42,5 +44,6 @@ class Enrollment(Base):
 
     __table_args__ = (
         Index("ix_enrollments_status_next_send", "status", "next_send_at"),
+        Index("ix_enrollments_sequence_created_id", "sequence_id", "created_at", "id"),
         UniqueConstraint("candidate_id", "sequence_id", name="uq_enrollment_candidate_sequence"),
     )

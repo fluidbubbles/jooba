@@ -1,0 +1,4 @@
+email,first_name
+not-an-email,Person1
+also bad,Person2
+missing-at-sign,Person3

@@ -1,11 +1,12 @@
 import { ArrowLeft, Upload } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import EmptyState from '../components/EmptyState'
+import CandidatesTable from '../components/CandidatesTable'
+import CsvUploadModal from '../components/CsvUploadModal'
 import StatCard from '../components/StatCard'
 import StatusBadge from '../components/StatusBadge'
 import { api, ApiRequestError } from '../lib/api'
-import type { Sequence, SequenceStatus } from '../lib/types'
+import type { EnrollResponse, Sequence, SequenceAnalytics, SequenceStatus } from '../lib/types'
 
 const BTN_PRIMARY =
   'rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60'
@@ -111,19 +112,41 @@ export default function SequenceDetail() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [analytics, setAnalytics] = useState<SequenceAnalytics | null>(null)
+  const [enrollResult, setEnrollResult] = useState<EnrollResponse | null>(null)
   const latestLoadRef = useRef(0)
   const latestStatusActionRef = useRef(0)
+  const latestAnalyticsRefreshRef = useRef(0)
+  const enrollToastTimerRef = useRef<number | null>(null)
   const activeRouteIdRef = useRef<string | undefined>(id)
+
+  const clearEnrollToastTimer = useCallback(() => {
+    if (enrollToastTimerRef.current !== null) {
+      window.clearTimeout(enrollToastTimerRef.current)
+      enrollToastTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      clearEnrollToastTimer()
+    }
+  }, [clearEnrollToastTimer])
 
   useEffect(() => {
     activeRouteIdRef.current = id
     latestStatusActionRef.current += 1
+    latestAnalyticsRefreshRef.current += 1
+    clearEnrollToastTimer()
     setSequence(null)
     setLoading(true)
     setLoadError(null)
     setStatusBusy(false)
     setActionError(null)
-  }, [id])
+    setEnrollResult(null)
+  }, [id, clearEnrollToastTimer])
 
   const loadSequence = useCallback(async () => {
     if (!id) return
@@ -131,9 +154,13 @@ export default function SequenceDetail() {
     setLoading(true)
     setLoadError(null)
     try {
-      const data = await api.sequences.get(id)
+      const [data, analyticsData] = await Promise.all([
+        api.sequences.get(id),
+        api.enrollments.analytics(id),
+      ])
       if (isOutdatedRequest(loadToken, id, latestLoadRef, activeRouteIdRef)) return
       setSequence(data)
+      setAnalytics(analyticsData)
     } catch (e) {
       console.error('Failed to load sequence:', e)
       if (isOutdatedRequest(loadToken, id, latestLoadRef, activeRouteIdRef)) return
@@ -156,7 +183,31 @@ export default function SequenceDetail() {
     [sequence],
   )
 
-  const applyStatus = async (next: SequenceStatus) => {
+  function handleEnrolled(result: EnrollResponse) {
+    if (!id) return
+    const targetId = id
+    setEnrollResult(result)
+    setShowUploadModal(false)
+    setRefreshKey((k) => k + 1)
+
+    const refreshToken = ++latestAnalyticsRefreshRef.current
+    void api.enrollments.analytics(targetId).then((analyticsData) => {
+      if (isOutdatedRequest(refreshToken, targetId, latestAnalyticsRefreshRef, activeRouteIdRef)) {
+        return
+      }
+      setAnalytics(analyticsData)
+    }).catch((e: unknown) => {
+      console.error('Failed to refresh analytics:', e)
+    })
+
+    clearEnrollToastTimer()
+    enrollToastTimerRef.current = window.setTimeout(() => {
+      setEnrollResult(null)
+      enrollToastTimerRef.current = null
+    }, 5000)
+  }
+
+  async function applyStatus(next: SequenceStatus) {
     if (!id || sequence?.id !== id) return
     const targetId = id
     const actionToken = ++latestStatusActionRef.current
@@ -235,6 +286,16 @@ export default function SequenceDetail() {
                 <StatusBadge status={sequence.status} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                {sequence.status === 'active' && (
+                  <button
+                    type="button"
+                    className={BTN_SECONDARY}
+                    onClick={() => setShowUploadModal(true)}
+                  >
+                    <Upload size={14} className="mr-1.5 inline" aria-hidden="true" />
+                    Upload CSV
+                  </button>
+                )}
                 <SequenceStatusActions
                   status={sequence.status}
                   busy={statusBusy}
@@ -244,13 +305,21 @@ export default function SequenceDetail() {
               </div>
             </div>
 
+            {enrollResult && (
+              <div role="alert" className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-[13px] text-green-800">
+                Enrolled {enrollResult.enrolled} candidate{enrollResult.enrolled !== 1 ? 's' : ''}.
+                {enrollResult.skipped > 0 && ` ${enrollResult.skipped} already enrolled (skipped).`}
+              </div>
+            )}
+
             <section aria-label="Sequence analytics">
               <h2 className="sr-only">Analytics</h2>
-              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                <StatCard label="Enrolled" value={0} />
-                <StatCard label="Sent" value={0} />
-                <StatCard label="Replies" value={0} />
-                <StatCard label="Open rate" value="0%" />
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+                <StatCard label="Enrolled" value={analytics?.enrolled ?? 0} />
+                <StatCard label="Sent" value={analytics?.sent ?? 0} />
+                <StatCard label="Replied" value={analytics?.replied ?? 0} />
+                <StatCard label="Interested" value={analytics?.interested ?? 0} accent />
+                <StatCard label="Bounced" value={analytics?.bounced ?? 0} />
               </div>
             </section>
 
@@ -294,19 +363,25 @@ export default function SequenceDetail() {
               <h2 id="candidates-heading" className="mb-4 text-lg font-semibold text-gray-900">
                 Candidates
               </h2>
-              <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50/50">
-                <EmptyState
-                  icon={Upload}
-                  title="No candidates yet"
-                  description="Upload a CSV to enroll candidates in this sequence. (Plan 3)"
-                  actionLabel="Upload CSV"
-                  onAction={() => {}}
-                />
-              </div>
+              <CandidatesTable
+                sequenceId={id}
+                onUploadCsv={
+                  sequence.status === 'active' ? () => setShowUploadModal(true) : undefined
+                }
+                refreshKey={refreshKey}
+              />
             </section>
           </>
         )}
       </div>
+
+      {showUploadModal && (
+        <CsvUploadModal
+          sequenceId={id}
+          onClose={() => setShowUploadModal(false)}
+          onEnrolled={handleEnrolled}
+        />
+      )}
     </div>
   )
 }

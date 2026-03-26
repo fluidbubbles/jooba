@@ -11,6 +11,7 @@ Architecture source: `docs/architecture/architecture.md`.
 - `models/`: ORM entities, relationships, enum definitions.
 - `schemas/`: request/response contract types.
 - `tasks/` (when added): thin async wrappers with retry policy, no business logic.
+- `utils/`: stateless helpers (crypto, formatting) with no DB or business-rule dependencies.
 - `integrations/` (when added): provider adapters (Nylas/OpenAI/mock), no business rules.
 
 ## Cross-package architecture rules
@@ -20,6 +21,10 @@ Architecture source: `docs/architecture/architecture.md`.
 - State transitions must be validated, not applied ad hoc.
 - Domain exceptions originate in services and are translated to HTTP in API handlers.
 - Async task dispatch from services should go through a dispatcher interface.
+
+## Exceptions
+
+- Domain exceptions live in `services/exceptions.py`. All layers (services, repos, API handlers) may import from this module.
 
 ## Evolution note
 
