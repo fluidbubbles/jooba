@@ -1,13 +1,3 @@
-x-backend-service-env: &backend-service-env
-  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://jooba:jooba@db:5432/jooba}
-  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-  NYLAS_API_KEY: ${NYLAS_API_KEY:-}
-  NYLAS_CLIENT_ID: ${NYLAS_CLIENT_ID:-}
-  SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-  EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
-  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-  LLM_PROVIDER: ${LLM_PROVIDER:-mock}
-
 services:
   db:
     image: postgres:16
@@ -33,8 +23,7 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
-    environment:
-      <<: *backend-service-env
+    env_file: ./.env
     depends_on:
       db:
         condition: service_healthy
@@ -58,8 +47,7 @@ services:
   celery-worker:
     build: ./backend
     command: celery -A app.celery_app worker -Q email,ai,default -c 4 --loglevel=info
-    environment:
-      <<: *backend-service-env
+    env_file: ./.env
     depends_on:
       db:
         condition: service_healthy
@@ -71,8 +59,7 @@ services:
   celery-beat:
     build: ./backend
     command: celery -A app.celery_app beat --loglevel=info
-    environment:
-      <<: *backend-service-env
+    env_file: ./.env
     depends_on:
       - redis
     volumes:

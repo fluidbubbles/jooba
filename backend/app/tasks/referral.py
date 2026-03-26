@@ -4,6 +4,7 @@ from uuid import UUID
 
 from app.celery_app import celery_app
 from app.database import celery_session
+from app.services.exceptions import PermanentError
 from app.services.referral_service import ReferralService
 
 logger = logging.getLogger(__name__)
@@ -23,10 +24,17 @@ REFERRAL_BACKOFF = 10
 def extract_referral(self, email_event_id: str) -> None:
     """Extract referral contact info from a classified reply.
 
-    Retry policy: 2 retries, fixed 10s backoff.
+    Retry policy: up to 2 retries (3 total attempts), fixed 10s backoff.
+    Permanent errors (missing data) are not retried.
     """
     try:
         asyncio.run(_extract(email_event_id))
+    except PermanentError as e:
+        logger.error(
+            "extract_referral permanent error for %s, not retrying: %s",
+            email_event_id,
+            e,
+        )
     except Exception as e:
         retries = self.request.retries
         if retries >= REFERRAL_MAX_RETRIES:

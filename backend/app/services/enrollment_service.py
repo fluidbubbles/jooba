@@ -268,7 +268,7 @@ class EnrollmentService:
             next_step = sequence.steps[step_index + 1]
             enrollment.current_step = step_index + 1
             enrollment.next_send_at = datetime.now(timezone.utc) + timedelta(
-                minutes=next_step.delay_minutes * 1440  # days → minutes
+                minutes=next_step.delay_minutes
             )
             await self._enrollment_repo.log_transition(
                 enrollment_id=enrollment_id,

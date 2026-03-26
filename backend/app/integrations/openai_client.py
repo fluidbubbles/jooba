@@ -52,6 +52,17 @@ class ReferralExtraction:
     company: str | None
 
 
+def _clean_opt_str(parsed: dict, key: str) -> str | None:
+    """Extract an optional trimmed string from a parsed JSON dict."""
+    value = parsed.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped if stripped else None
+    return None
+
+
 class OpenAIClient:
     def __init__(self) -> None:
         self.client = OpenAI(api_key=settings.openai_api_key)
@@ -107,20 +118,11 @@ class OpenAIClient:
             if not isinstance(parsed, dict):
                 raise TypeError("expected JSON object")
 
-            def _opt_str(key: str) -> str | None:
-                value = parsed.get(key)
-                if value is None:
-                    return None
-                if isinstance(value, str):
-                    stripped = value.strip()
-                    return stripped if stripped else None
-                return None
-
             return ReferralExtraction(
-                name=_opt_str("name"),
-                email=_opt_str("email"),
-                title=_opt_str("title"),
-                company=_opt_str("company"),
+                name=_clean_opt_str(parsed, "name"),
+                email=_clean_opt_str(parsed, "email"),
+                title=_clean_opt_str(parsed, "title"),
+                company=_clean_opt_str(parsed, "company"),
             )
         except (json.JSONDecodeError, TypeError) as exc:
             raise TransientError(f"Failed to parse referral extraction response: {content}") from exc

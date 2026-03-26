@@ -1,7 +1,6 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
-from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -11,13 +10,12 @@ from app.repositories.email_event_repo import EmailEventRepository
 from app.repositories.enrollment_repo import EnrollmentRepository
 from app.repositories.sequence_repo import SequenceRepository
 from app.schemas.email_event import InboxReplyItem, ReplyDetail, SentimentCounts, ThreadEvent
-from app.schemas.enrollment import CandidateInput, EnrollResponse
+from app.schemas.enrollment import EnrollResponse
 from app.schemas.referral import ReferralEnrollRequest, ReferralInfo
-from app.services.enrollment_service import EnrollmentService
 from app.services.exceptions import DomainError
 from app.services.referral_service import ReferralService
+from app.tasks.dispatcher import get_dispatcher
 from app.utils.formatting import format_candidate_name
-from app.utils.name_parse import split_full_name
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
 
@@ -83,18 +81,23 @@ async def get_reply_referral(email_event_id: UUID, db: AsyncSession = Depends(ge
 
 @router.post(
     "/replies/{email_event_id}/referral/retry",
-    response_model=ReferralInfo | None,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def retry_referral_extraction(
     email_event_id: UUID, db: AsyncSession = Depends(get_db)
 ):
-    referral_service = ReferralService(db)
-    await referral_service.process_referral(email_event_id)
-    await db.commit()
-    data = await referral_service.get_referral_for_event(email_event_id)
-    if data is None:
-        return None
-    return ReferralInfo.model_validate(data)
+    """Dispatch referral extraction as an async task and return immediately."""
+    event_repo = EmailEventRepository(db)
+    event = await event_repo.find_by_id(email_event_id)
+    if not event:
+        raise DomainError("Reply not found", "REPLY_NOT_FOUND")
+
+    get_dispatcher().dispatch(
+        "app.tasks.referral.extract_referral",
+        str(email_event_id),
+        queue="ai",
+    )
+    return {"status": "accepted"}
 
 
 @router.post(
@@ -108,30 +111,7 @@ async def enroll_referred_candidate(
     db: AsyncSession = Depends(get_db),
 ) -> EnrollResponse:
     referral_service = ReferralService(db)
-    referral = await referral_service.get_referral_for_event(email_event_id)
-    if referral is None or not referral.get("email"):
-        raise DomainError(
-            "Cannot enroll referral without email",
-            "REFERRAL_NO_EMAIL",
-        )
-
-    first_name, last_name = split_full_name(referral["name"])
-    try:
-        candidate = CandidateInput(
-            email=referral["email"],
-            first_name=first_name,
-            last_name=last_name,
-            company=referral["company"],
-            title=referral["title"],
-        )
-    except ValidationError:
-        raise DomainError(
-            "Invalid referral email or candidate data",
-            "REFERRAL_INVALID_EMAIL",
-        ) from None
-
-    enrollment_service = EnrollmentService(db)
-    result = await enrollment_service.enroll_candidates(body.sequence_id, [candidate])
+    result = await referral_service.enroll_referred(email_event_id, body.sequence_id)
     return EnrollResponse(**result)
 
 

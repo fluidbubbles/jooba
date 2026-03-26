@@ -5,13 +5,19 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.integrations.openai_client import OpenAIClient
+from app.integrations.referral_extractor import get_referral_extractor
 from app.models.enums import EnrollmentStatus, SequenceStatus
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.email_event_repo import EmailEventRepository
 from app.repositories.enrollment_repo import EnrollmentRepository
 from app.repositories.referral_repo import ReferralRepository
 from app.repositories.sequence_repo import SequenceRepository
+from app.services.exceptions import (
+    CandidateNotFound,
+    DomainError,
+    EmailEventNotFound,
+    EnrollmentNotFound,
+)
 from app.utils.name_parse import format_display_name, split_full_name
 from app.utils.unsubscribe import generate_unsubscribe_token
 
@@ -22,19 +28,21 @@ _PLACEHOLDER_EMAIL_SUFFIX = "@placeholder.local"
 
 class ReferralService:
     def __init__(self, db: AsyncSession) -> None:
+        self._db = db
         self._event_repo = EmailEventRepository(db)
         self._candidate_repo = CandidateRepository(db)
         self._referral_repo = ReferralRepository(db)
         self._enrollment_repo = EnrollmentRepository(db)
         self._sequence_repo = SequenceRepository(db)
-        self._openai = OpenAIClient()
+        self._extractor = get_referral_extractor()
 
     async def process_referral(self, email_event_id: UUID) -> None:
-        """Extract referral info from a classified reply and create records (idempotent)."""
+        """Extract referral info from a classified reply, create the referral record,
+        and auto-enroll the referred/referrer into appropriate sequences (idempotent).
+        """
         event = await self._event_repo.find_by_id_for_update(email_event_id)
         if not event:
-            logger.warning("process_referral called for missing event %s", email_event_id)
-            return
+            raise EmailEventNotFound(email_event_id)
 
         existing = await self._referral_repo.get_by_email_event(email_event_id)
         if existing is not None:
@@ -43,24 +51,14 @@ class ReferralService:
 
         enrollment = await self._enrollment_repo.get_by_id(event.enrollment_id)
         if enrollment is None:
-            logger.error(
-                "process_referral: enrollment %s missing for event %s",
-                event.enrollment_id,
-                email_event_id,
-            )
-            return
+            raise EnrollmentNotFound(event.enrollment_id)
 
         referrer = await self._candidate_repo.get_by_id(enrollment.candidate_id)
         if referrer is None:
-            logger.error(
-                "process_referral: referrer candidate %s missing for event %s",
-                enrollment.candidate_id,
-                email_event_id,
-            )
-            return
+            raise CandidateNotFound(str(enrollment.candidate_id))
 
         reply_text = event.body_html or event.body_text or ""
-        extraction = self._openai.extract_referral(reply_text)
+        extraction = self._extractor.extract(reply_text)
 
         if not extraction.name and not extraction.email:
             logger.debug(
@@ -148,6 +146,33 @@ class ReferralService:
                 candidate_id, sequence_name, trigger,
             )
 
+    async def enroll_referred(self, email_event_id: UUID, sequence_id: UUID) -> dict:
+        """Enroll a referred candidate from a referral into a sequence.
+
+        Returns the enrollment result dict from EnrollmentService.
+        """
+        from app.schemas.enrollment import CandidateInput
+        from app.services.enrollment_service import EnrollmentService
+
+        referral = await self.get_referral_for_event(email_event_id)
+        if referral is None or not referral.get("email"):
+            raise DomainError(
+                "Cannot enroll referral without email",
+                "REFERRAL_NO_EMAIL",
+            )
+
+        first_name, last_name = split_full_name(referral["name"])
+        candidate = CandidateInput(
+            email=referral["email"],
+            first_name=first_name,
+            last_name=last_name,
+            company=referral["company"],
+            title=referral["title"],
+        )
+
+        enrollment_service = EnrollmentService(self._db)
+        return await enrollment_service.enroll_candidates(sequence_id, [candidate])
+
     async def get_referral_for_event(self, email_event_id: UUID) -> dict | None:
         referral = await self._referral_repo.get_by_email_event(email_event_id)
         if referral is None:
@@ -156,11 +181,10 @@ class ReferralService:
         referrer = await self._candidate_repo.get_by_id(referral.referrer_candidate_id)
         referred = await self._candidate_repo.get_by_id(referral.referred_candidate_id)
         if referrer is None or referred is None:
-            logger.error(
-                "get_referral_for_event: missing candidate row(s) for referral %s",
-                referral.id,
+            raise DomainError(
+                "Referral data integrity error: missing candidate record(s)",
+                "REFERRAL_DATA_CORRUPT",
             )
-            return None
 
         is_placeholder = referred.email.endswith(_PLACEHOLDER_EMAIL_SUFFIX)
 

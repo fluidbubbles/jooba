@@ -47,8 +47,8 @@ async def nylas_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         body = json.loads(raw_body)
     except json.JSONDecodeError:
-        logger.warning("Malformed webhook payload, discarding")
-        return {"status": "ok"}
+        logger.warning("Malformed webhook payload, could not parse JSON")
+        raise HTTPException(status_code=400, detail="Malformed webhook payload")
 
     # Nylas v3 webhook payload — extract message data
     data = body.get("data", {})
@@ -70,7 +70,10 @@ async def nylas_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         await service.process_webhook(message_data)
     except Exception:
-        logger.exception("Webhook processing failed, returning 200 to prevent Nylas retry")
+        logger.exception(
+            "Webhook processing failed for message_id=%s, returning 200 to prevent Nylas retry",
+            message_data.get("message_id"),
+        )
 
     return {"status": "ok"}
 

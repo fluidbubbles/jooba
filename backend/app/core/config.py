@@ -4,42 +4,42 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = Field(default="postgresql+asyncpg://jooba:jooba@db:5432/jooba")
+    database_url: str
 
     # Redis
-    redis_url: str = Field(default="redis://redis:6379/0")
+    redis_url: str
 
     # Nylas
-    nylas_client_id: str = Field(default="")
-    nylas_api_key: str = Field(default="")
-    nylas_callback_url: str = Field(default="http://localhost:8000/api/nylas/callback")
-    nylas_webhook_secret: str = Field(default="")
-    nylas_webhook_url: str = Field(default="")
+    nylas_client_id: str
+    nylas_api_key: str
+    nylas_callback_url: str
+    nylas_webhook_secret: str = ""  # auto-stored on webhook registration
+    nylas_webhook_url: str = ""  # optional — polling fallback if unset
 
     # OpenAI
-    openai_api_key: str = Field(default="")
-    openai_model: str = Field(default="gpt-4o-mini")
+    openai_api_key: str
+    openai_model: str = "gpt-5-mini"
 
     # App
-    secret_key: str = Field(default="change-me-in-production")
+    secret_key: str
 
     # Provider selection
-    email_provider: str = Field(default="nylas")  # nylas | mock
-    llm_provider: str = Field(default="openai")  # openai | mock
+    email_provider: str  # nylas | mock
+    llm_provider: str  # openai | mock
 
     # Unsubscribe
-    unsubscribe_base_url: str = Field(default="http://localhost:8000/api/unsubscribe")
+    unsubscribe_base_url: str
 
     # Frontend URL (for OAuth redirect)
-    frontend_url: str = Field(default="http://localhost:3000")
+    frontend_url: str
 
     # Unreplied threshold
-    unreplied_threshold_minutes: int = Field(default=5)
+    unreplied_threshold_minutes: int = 5
 
     # Referral auto-enrollment
-    referral_sequence_name: str = Field(default="Referral Outreach")
-    referral_clarification_sequence_name: str = Field(default="Referral Clarification")
-    referral_thank_you_sequence_name: str = Field(default="Referral Thank You")
+    referral_sequence_name: str = "Referral Outreach"
+    referral_clarification_sequence_name: str = "Referral Clarification"
+    referral_thank_you_sequence_name: str = "Referral Thank You"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

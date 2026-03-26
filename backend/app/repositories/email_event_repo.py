@@ -50,7 +50,7 @@ class EmailEventRepository:
         return result.scalar_one_or_none()
 
     async def find_by_id_for_update(self, event_id: UUID) -> EmailEvent | None:
-        """Load an email event with a row lock (serializes concurrent referral processing)."""
+        """Load an email event with a FOR UPDATE lock (prevents duplicate referral extraction from concurrent task retries)."""
         result = await self._db.execute(
             select(EmailEvent).where(EmailEvent.id == event_id).with_for_update()
         )
@@ -109,15 +109,10 @@ class EmailEventRepository:
         )
         return list(result.scalars().all())
 
-    async def get_inbox_replies(
-        self,
-        sentiment_filter: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[dict]:
-        """Get one inbox entry per enrollment, showing the latest inbound reply."""
-        # Subquery: latest inbound event per enrollment (by created_at)
-        latest_sq = (
+    @staticmethod
+    def _latest_inbound_per_enrollment():
+        """Subquery: latest inbound event per enrollment (by created_at)."""
+        return (
             select(
                 EmailEvent.enrollment_id,
                 func.max(EmailEvent.created_at).label("latest_ts"),
@@ -126,6 +121,15 @@ class EmailEventRepository:
             .group_by(EmailEvent.enrollment_id)
             .subquery()
         )
+
+    async def get_inbox_replies(
+        self,
+        sentiment_filter: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Get one inbox entry per enrollment, showing the latest inbound reply."""
+        latest_sq = self._latest_inbound_per_enrollment()
 
         stmt = (
             select(
@@ -178,16 +182,7 @@ class EmailEventRepository:
 
     async def get_sentiment_counts(self) -> dict[str, int]:
         """Get count of conversations (one per enrollment) per sentiment."""
-        # Use the latest inbound event per enrollment for the sentiment
-        latest_sq = (
-            select(
-                EmailEvent.enrollment_id,
-                func.max(EmailEvent.created_at).label("latest_ts"),
-            )
-            .where(EmailEvent.direction == EmailDirection.INBOUND.value)
-            .group_by(EmailEvent.enrollment_id)
-            .subquery()
-        )
+        latest_sq = self._latest_inbound_per_enrollment()
 
         result = await self._db.execute(
             select(EmailEvent.sentiment, func.count(EmailEvent.id))
