@@ -40,6 +40,24 @@ class TestMockClassifier:
         result = c.classify("I'm not interested in this role")
         assert result.sentiment == "not_interested"
 
+    def test_referral_takes_priority_over_not_interested(self):
+        """A reply that declines but refers someone is a referral, not a decline."""
+        c = MockClassifier()
+        result = c.classify(
+            "I'm not looking right now, but you should talk to my colleague Sarah Kim"
+        )
+        assert result.sentiment == "referral"
+
+    def test_not_looking_without_referral_is_decline(self):
+        c = MockClassifier()
+        result = c.classify("Thanks but I'm happy at Meta. Not looking to move.")
+        assert result.sentiment == "not_interested"
+
+    def test_happy_at_is_decline(self):
+        c = MockClassifier()
+        result = c.classify("I'm happy at my current company, thanks though")
+        assert result.sentiment == "not_interested"
+
     def test_case_insensitive(self):
         c = MockClassifier()
         assert c.classify("NOT INTERESTED").sentiment == "not_interested"
