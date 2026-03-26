@@ -27,7 +27,8 @@ class ClassificationService:
             return
 
         classifier = get_classifier()
-        result = classifier.classify(event.body_text or event.body_html or "")
+        # Prefer body_html (full body) over body_text (Nylas snippet, often truncated)
+        result = classifier.classify(event.body_html or event.body_text or "")
 
         try:
             validated = Sentiment(result.sentiment)
