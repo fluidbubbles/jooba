@@ -25,9 +25,16 @@ def update_enrollment_on_reply(self, email_event_id: str) -> None:
     try:
         asyncio.run(_update(email_event_id))
     except Exception as e:
+        retries = self.request.retries
+        if retries >= 3:
+            logger.critical(
+                "update_enrollment_on_reply exhausted retries for %s — reply state may be lost",
+                email_event_id,
+            )
+            return
         logger.error(
             "update_enrollment_on_reply failed (attempt %d/3): %s",
-            self.request.retries + 1, e,
+            retries + 1, e,
         )
         raise self.retry(countdown=0, max_retries=3)
 

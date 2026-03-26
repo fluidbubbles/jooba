@@ -390,6 +390,7 @@ class EnrollmentService:
             EnrollmentStatus.OPTED_OUT.value,
             EnrollmentStatus.BOUNCED.value,
         ):
+            logger.debug("mark_replied: enrollment %s already terminal (status=%s), skipping", enrollment_id, enrollment.status)
             return
 
         old_status = enrollment.status
