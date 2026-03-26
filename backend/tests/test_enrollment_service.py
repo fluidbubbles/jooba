@@ -137,7 +137,7 @@ class TestEnrollmentService:
         service._enrollment_repo.log_transition.assert_awaited_once_with(
             enrollment_id=enrollment_id,
             from_status=None,
-            to_status=EnrollmentStatus.ACTIVE.value,
+            to_status=EnrollmentStatus.ACTIVE,
             trigger="enrolled",
         )
 
