@@ -1,6 +1,10 @@
 import type {
   ApiError,
+  CandidateInput,
+  EnrollResponse,
+  PaginatedEnrollments,
   Sequence,
+  SequenceAnalytics,
   SequenceCreateInput,
   SequenceListItem,
   SequenceStatus,
@@ -63,6 +67,25 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify({ status }),
       })
+    },
+  },
+
+  enrollments: {
+    enroll(sequenceId: string, candidates: CandidateInput[]): Promise<EnrollResponse> {
+      return apiFetch<EnrollResponse>(`/sequences/${sequenceId}/enroll`, {
+        method: 'POST',
+        body: JSON.stringify({ candidates }),
+      })
+    },
+
+    list(sequenceId: string, status?: string, limit = 50, offset = 0): Promise<PaginatedEnrollments> {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      if (status && status !== 'all') params.set('status', status)
+      return apiFetch<PaginatedEnrollments>(`/sequences/${sequenceId}/enrollments?${params}`)
+    },
+
+    analytics(sequenceId: string): Promise<SequenceAnalytics> {
+      return apiFetch<SequenceAnalytics>(`/sequences/${sequenceId}/analytics`)
     },
   },
 }
