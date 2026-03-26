@@ -373,7 +373,7 @@ class EnrollmentService:
         """
         event = await self._event_repo.find_by_id(email_event_id)
         if not event:
-            logger.warning("mark_replied_by_event: event %s not found", email_event_id)
+            logger.error("mark_replied_by_event: event %s not found", email_event_id)
             return
         await self.mark_replied(event.enrollment_id)
 
@@ -381,7 +381,7 @@ class EnrollmentService:
         """Mark enrollment as REPLIED — candidate responded, cancel follow-ups."""
         enrollment = await self._enrollment_repo.get_by_id(enrollment_id)
         if not enrollment:
-            logger.warning("mark_replied: enrollment %s not found", enrollment_id)
+            logger.error("mark_replied: enrollment %s not found", enrollment_id)
             return
 
         # Idempotency: skip if already in terminal state

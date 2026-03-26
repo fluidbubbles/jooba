@@ -143,7 +143,7 @@ class EmailEventRepository:
     async def get_sentiment_counts(self) -> dict[str, int]:
         """Get count of inbound replies per sentiment for inbox tabs."""
         result = await self._db.execute(
-            select(EmailEvent.sentiment, func.count())
+            select(EmailEvent.sentiment, func.count(EmailEvent.id))
             .where(
                 and_(
                     EmailEvent.direction == EmailDirection.INBOUND.value,

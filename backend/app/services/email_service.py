@@ -69,7 +69,10 @@ class EmailService:
 
         # Determine direction
         account = await self._nylas_repo.get_first()
-        account_email = account.email.lower() if account else ""
+        if not account:
+            logger.warning("Webhook: no Nylas account configured, cannot determine direction")
+            return
+        account_email = account.email.lower()
 
         if sender_email == account_email:
             # Outbound — recruiter replied from their email client
@@ -144,6 +147,8 @@ class EmailService:
             raise DomainError("Enrollment not found", "ENROLLMENT_NOT_FOUND")
 
         candidate = await self._candidate_repo.get_by_id(enrollment.candidate_id)
+        if not candidate:
+            raise DomainError("Candidate not found", "CANDIDATE_NOT_FOUND")
 
         # Append unsubscribe footer
         unsub_url = f"{settings.unsubscribe_base_url}/{enrollment.unsubscribe_token}"
@@ -154,11 +159,13 @@ class EmailService:
         if not account:
             raise PermanentError("No email account connected")
 
+        reply_subject = f"Re: {original.subject or ''}"
+
         sender = get_email_sender()
         result = sender.send(
             grant_id=account.grant_id,
             to=candidate.email,
-            subject=f"Re: {original.subject or ''}",
+            subject=reply_subject,
             body_html=body_with_footer,
             reply_to_message_id=original.nylas_message_id,
         )
@@ -167,7 +174,7 @@ class EmailService:
         event = await self._event_repo.create(
             enrollment_id=enrollment.id,
             direction=EmailDirection.OUTBOUND,
-            subject=f"Re: {original.subject or ''}",
+            subject=reply_subject,
             body_html=body_with_footer,
             nylas_message_id=result.message_id,
             nylas_thread_id=result.thread_id,

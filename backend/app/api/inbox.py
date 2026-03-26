@@ -55,8 +55,14 @@ async def get_reply_detail(email_event_id: UUID, db: AsyncSession = Depends(get_
         raise DomainError("Reply not found", "REPLY_NOT_FOUND")
 
     enrollment = await enrollment_repo.get_by_id(event.enrollment_id)
+    if not enrollment:
+        raise DomainError("Enrollment not found", "ENROLLMENT_NOT_FOUND")
     candidate = await candidate_repo.get_by_id(enrollment.candidate_id)
+    if not candidate:
+        raise DomainError("Candidate not found", "CANDIDATE_NOT_FOUND")
     sequence = await sequence_repo.get_by_id(enrollment.sequence_id)
+    if not sequence:
+        raise DomainError("Sequence not found", "SEQUENCE_NOT_FOUND")
 
     thread = await event_repo.get_thread(enrollment.id)
 

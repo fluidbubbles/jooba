@@ -8,11 +8,13 @@ from app.services.enrollment_service import EnrollmentService
 
 logger = logging.getLogger(__name__)
 
+REPLY_MAX_RETRIES = 3
+
 
 @celery_app.task(
     name="app.tasks.enrollment.update_enrollment_on_reply",
     bind=True,
-    max_retries=3,
+    max_retries=REPLY_MAX_RETRIES,
     acks_late=True,
     queue="default",
 )
@@ -24,19 +26,19 @@ def update_enrollment_on_reply(self, email_event_id: str) -> None:
     """
     try:
         asyncio.run(_update(email_event_id))
-    except Exception as e:
+    except Exception:
         retries = self.request.retries
-        if retries >= 3:
+        if retries >= REPLY_MAX_RETRIES:
             logger.critical(
                 "update_enrollment_on_reply exhausted retries for %s — reply state may be lost",
                 email_event_id,
             )
             return
-        logger.error(
-            "update_enrollment_on_reply failed (attempt %d/3): %s",
-            retries + 1, e,
+        logger.exception(
+            "update_enrollment_on_reply failed (attempt %d/%d)",
+            retries + 1, REPLY_MAX_RETRIES,
         )
-        raise self.retry(countdown=0, max_retries=3)
+        raise self.retry(countdown=0, max_retries=REPLY_MAX_RETRIES)
 
 
 async def _update(email_event_id: str) -> None:

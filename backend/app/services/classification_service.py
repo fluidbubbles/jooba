@@ -36,7 +36,7 @@ class ClassificationService:
         try:
             validated = Sentiment(result.sentiment)
         except ValueError:
-            logger.warning("Unknown sentiment %r from classifier, defaulting to neutral", result.sentiment)
+            logger.error("Unknown sentiment %r from classifier, defaulting to neutral", result.sentiment)
             validated = Sentiment.NEUTRAL
 
         await self._event_repo.update_sentiment(

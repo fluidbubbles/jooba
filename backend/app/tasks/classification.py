@@ -15,7 +15,7 @@ CLASSIFY_BACKOFFS = [10, 30, 90]
 @celery_app.task(
     name="app.tasks.classification.classify_reply",
     bind=True,
-    max_retries=3,
+    max_retries=CLASSIFY_MAX_RETRIES,
     acks_late=True,
     queue="ai",
     soft_time_limit=30,

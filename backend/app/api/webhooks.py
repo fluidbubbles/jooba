@@ -34,26 +34,31 @@ async def nylas_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             logger.warning("Invalid Nylas webhook signature")
             raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
-    body = json.loads(raw_body)
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError:
+        logger.warning("Malformed webhook payload, discarding")
+        return {"status": "ok"}
 
-    # Nylas v3 webhook payload -- extract message data
+    # Nylas v3 webhook payload — extract message data
     data = body.get("data", {})
+    from_list = data.get("from", [])
+    sender_email = from_list[0].get("email", "") if from_list and isinstance(from_list, list) else ""
+
     message_data = {
         "message_id": data.get("id"),
         "thread_id": data.get("thread_id"),
-        "sender_email": "",
+        "sender_email": sender_email,
         "subject": data.get("subject", ""),
         "body_html": data.get("body", ""),
         "body_text": data.get("snippet", ""),
     }
 
-    # Extract sender email from "from" field
-    from_list = data.get("from", [])
-    if from_list and isinstance(from_list, list):
-        message_data["sender_email"] = from_list[0].get("email", "")
-
     service = EmailService(db)
-    await service.process_webhook(message_data)
+    try:
+        await service.process_webhook(message_data)
+    except Exception:
+        logger.exception("Webhook processing failed, returning 200 to prevent Nylas retry")
 
     return {"status": "ok"}
 
