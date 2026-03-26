@@ -24,24 +24,24 @@ export default function ReplyListItem({ reply, isSelected, onClick }: Props) {
       onClick={onClick}
       className={`p-4 cursor-pointer border-l-2 transition-colors ${
         isSelected
-          ? 'bg-blue-500/10 border-blue-500'
-          : 'border-transparent hover:bg-white/5'
+          ? 'bg-blue-50 border-blue-500'
+          : 'border-transparent hover:bg-gray-50'
       }`}
     >
       <div className="flex items-center gap-2 mb-1">
         <SentimentBadge sentiment={reply.sentiment} />
-        <span className="text-white text-sm font-medium truncate">{reply.candidate_name}</span>
+        <span className="text-gray-900 text-sm font-medium truncate">{reply.candidate_name}</span>
       </div>
-      <p className="text-gray-500 text-xs mb-1 truncate">{reply.candidate_email}</p>
-      <p className="text-gray-400 text-sm line-clamp-2 mb-2">"{reply.body_snippet}"</p>
-      <div className="flex items-center gap-3 text-xs text-gray-500">
+      <p className="text-gray-400 text-xs mb-1 truncate">{reply.candidate_email}</p>
+      <p className="text-gray-500 text-sm line-clamp-2 mb-2">"{reply.body_snippet}"</p>
+      <div className="flex items-center gap-3 text-xs text-gray-400">
         <span>{reply.sequence_name}</span>
         <span>&middot;</span>
         <span>{timeAgo(reply.created_at)}</span>
         {reply.is_unreplied && (
           <>
             <span>&middot;</span>
-            <span className="flex items-center gap-1 text-amber-400">
+            <span className="flex items-center gap-1 text-amber-500">
               <Clock size={12} />
               Unreplied
             </span>
