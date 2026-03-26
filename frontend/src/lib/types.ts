@@ -123,3 +123,47 @@ export interface SequenceAnalytics {
   completed: number
   paused: number
 }
+
+export interface InboxReply {
+  id: string
+  enrollment_id: string
+  candidate_name: string
+  candidate_email: string
+  body_snippet: string
+  sentiment: Sentiment | null
+  sentiment_reasoning: string | null
+  sequence_name: string
+  created_at: string
+  is_unreplied: boolean
+}
+
+export interface ThreadEvent {
+  id: string
+  direction: 'inbound' | 'outbound'
+  subject: string | null
+  body_html: string | null
+  body_text: string | null
+  sentiment: string | null
+  sentiment_reasoning: string | null
+  is_manual_reply: boolean
+  step_index: number | null
+  created_at: string
+}
+
+export interface ReplyDetail {
+  enrollment_id: string
+  candidate_name: string
+  candidate_email: string
+  sequence_name: string
+  sentiment: string | null
+  sentiment_reasoning: string | null
+  thread: ThreadEvent[]
+}
+
+export interface SentimentCounts {
+  all: number
+  interested: number
+  not_interested: number
+  referral: number
+  neutral: number
+}

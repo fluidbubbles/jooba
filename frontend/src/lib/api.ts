@@ -3,16 +3,19 @@ import type {
   CandidateInput,
   EnrollmentStatus,
   EnrollResponse,
+  InboxReply,
   NylasAuthUrlResponse,
   NylasConnection,
   NylasDisconnectResponse,
   PaginatedEnrollments,
+  ReplyDetail,
   Sequence,
   SequenceAnalytics,
   SequenceCreateInput,
   SequenceListItem,
   SequenceStatus,
   SequenceUpdateInput,
+  SentimentCounts,
 } from './types'
 
 const BASE_URL = '/api'
@@ -105,6 +108,29 @@ export const api = {
 
     disconnect(): Promise<NylasDisconnectResponse> {
       return apiFetch<NylasDisconnectResponse>('/nylas/disconnect', { method: 'DELETE' })
+    },
+  },
+
+  inbox: {
+    replies(sentiment?: string, limit = 50, offset = 0): Promise<InboxReply[]> {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      if (sentiment && sentiment !== 'all') params.set('sentiment', sentiment)
+      return apiFetch<InboxReply[]>(`/inbox/replies?${params}`)
+    },
+
+    counts(): Promise<SentimentCounts> {
+      return apiFetch<SentimentCounts>('/inbox/counts')
+    },
+
+    detail(eventId: string): Promise<ReplyDetail> {
+      return apiFetch<ReplyDetail>(`/inbox/replies/${eventId}`)
+    },
+
+    sendReply(eventId: string, bodyHtml: string): Promise<{ message_id: string; event_id: string }> {
+      return apiFetch<{ message_id: string; event_id: string }>(`/replies/${eventId}/reply`, {
+        method: 'POST',
+        body: JSON.stringify({ body_html: bodyHtml }),
+      })
     },
   },
 }
