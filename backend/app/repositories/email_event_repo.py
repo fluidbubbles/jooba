@@ -52,14 +52,14 @@ class EmailEventRepository:
         return result.scalar_one_or_none()
 
     async def find_by_message_id(self, nylas_message_id: str) -> EmailEvent | None:
-        """Check if we already processed this message (webhook dedup)."""
+        """Find an email event by its Nylas message ID."""
         result = await self._db.execute(
             select(EmailEvent).where(EmailEvent.nylas_message_id == nylas_message_id)
         )
         return result.scalar_one_or_none()
 
     async def find_by_thread_id(self, thread_id: str) -> EmailEvent | None:
-        """Find any email event in a thread -- used to match inbound to enrollment."""
+        """Find the most recent email event in a Nylas thread."""
         result = await self._db.execute(
             select(EmailEvent)
             .where(EmailEvent.nylas_thread_id == thread_id)

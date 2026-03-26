@@ -54,7 +54,7 @@ class EmailService:
         body_html = data.get("body_html", "")
         body_text = data.get("body_text", "")
 
-        # Webhook deduplication (unique constraint on nylas_message_id)
+        # Webhook deduplication: skip if message already recorded
         if message_id:
             existing = await self._event_repo.find_by_message_id(message_id)
             if existing:
