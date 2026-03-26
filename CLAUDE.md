@@ -81,6 +81,9 @@ Vite proxies `/api` and `/health` to `VITE_DEV_PROXY_TARGET` (Compose sets `http
 - `docker ps --format '{{.Names}}\t{{.Ports}}'` - Before `docker compose up --build -d`, check for other running stacks already binding `3000`/`8000` (for example `jooba-plan5-*`).
 - `docker compose up -d --force-recreate backend frontend` - If frontend logs `getaddrinfo ENOTFOUND backend`, recreate app containers to restore Compose DNS aliasing.
 - `EMAIL_PROVIDER=mock docker compose up -d --force-recreate backend celery-worker celery-beat` - Run Plan 4 smoke email flow with `MockSender` without editing committed Compose config.
+- **Git worktrees and `.env`:** Worktrees do NOT share untracked files. After `git worktree add`, copy `.env` manually: `cp /Users/admin/projects/jooba/.env ../jooba-planN/.env`.
+- **Docker port conflicts with worktrees:** Only one stack can bind `5432`/`8000`/`3000` at a time. Run `docker compose down` on the active stack before starting another.
+- **`celerybeat-schedule*` files:** Already in `.gitignore`. If they appear in `git status`, do not commit them.
 
 ## Universal implementation rules
 
