@@ -5,7 +5,7 @@ from uuid import UUID
 from celery import Task
 
 from app.celery_app import celery_app
-from app.database import async_session
+from app.database import celery_session
 from app.services.enrollment_service import EnrollmentService
 from app.services.exceptions import PermanentError, ProviderRateLimited, TransientError
 
@@ -67,14 +67,14 @@ def send_sequence_email(self: Task, enrollment_id: str) -> None:
 
 
 async def _send(enrollment_id: str) -> None:
-    async with async_session() as db:
+    async with celery_session() as db:
         service = EnrollmentService(db)
         await service.send_email_for_enrollment(UUID(enrollment_id))
         await db.commit()
 
 
 async def _pause_enrollment(enrollment_id: str) -> None:
-    async with async_session() as db:
+    async with celery_session() as db:
         service = EnrollmentService(db)
         await service.mark_paused(UUID(enrollment_id))
         await db.commit()
