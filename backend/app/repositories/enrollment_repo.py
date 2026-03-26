@@ -147,6 +147,22 @@ class EnrollmentRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_latest_by_candidate(
+        self,
+        candidate_id: UUID,
+        statuses: list[EnrollmentStatus],
+    ) -> Enrollment | None:
+        """Get the most recent enrollment for a candidate in one of the given statuses."""
+        result = await self._db.execute(
+            select(Enrollment).where(
+                and_(
+                    Enrollment.candidate_id == candidate_id,
+                    Enrollment.status.in_([s.value for s in statuses]),
+                )
+            ).order_by(Enrollment.created_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def list_by_sequence(
         self,
         sequence_id: UUID,

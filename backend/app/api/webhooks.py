@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.database import get_db
 from app.integrations.nylas_client import NylasClient
 from app.services.email_service import EmailService
@@ -18,14 +19,20 @@ async def nylas_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     """Receive Nylas webhook notifications for new messages.
 
     Validates webhook signature before processing.
-    Must return 200 quickly -- heavy processing dispatched to Celery.
+    Must return 200 quickly — heavy processing dispatched to Celery.
     """
     raw_body = await request.body()
     signature = request.headers.get("X-Nylas-Signature", "")
-    nylas_client = NylasClient()
-    if signature and not nylas_client.verify_webhook_signature(raw_body, signature):
-        logger.warning("Invalid Nylas webhook signature")
-        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    # When a webhook secret is configured, require a valid signature
+    if settings.nylas_webhook_secret:
+        if not signature:
+            logger.warning("Missing Nylas webhook signature")
+            raise HTTPException(status_code=401, detail="Missing webhook signature")
+        nylas_client = NylasClient()
+        if not nylas_client.verify_webhook_signature(raw_body, signature):
+            logger.warning("Invalid Nylas webhook signature")
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     body = json.loads(raw_body)
 

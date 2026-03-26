@@ -1,13 +1,11 @@
 import logging
 from uuid import UUID
 
-from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.integrations.email_sender import get_email_sender
 from app.models.candidate import Candidate
-from app.models.enrollment import Enrollment
 from app.models.enums import EmailDirection, EnrollmentStatus
 from app.models.sequence import SequenceStep
 from app.repositories.candidate_repo import CandidateRepository
@@ -100,10 +98,10 @@ class EmailService:
             queue="default",
         )
 
-    async def _match_to_enrollment(self, thread_id: str | None, sender_email: str) -> Enrollment | None:
+    async def _match_to_enrollment(self, thread_id: str | None, sender_email: str):
         """Match an incoming message to an enrollment.
 
-        Try 1: thread_id match (most reliable -- same email thread)
+        Try 1: thread_id match (most reliable — same email thread)
         Try 2: sender email match to candidate with active/replied enrollment (fallback)
         """
         if thread_id:
@@ -114,18 +112,10 @@ class EmailService:
         if sender_email:
             candidate = await self._candidate_repo.get_by_email(sender_email)
             if candidate:
-                result = await self._db.execute(
-                    select(Enrollment).where(
-                        and_(
-                            Enrollment.candidate_id == candidate.id,
-                            Enrollment.status.in_([
-                                EnrollmentStatus.ACTIVE.value,
-                                EnrollmentStatus.REPLIED.value,
-                            ]),
-                        )
-                    ).order_by(Enrollment.created_at.desc()).limit(1)
+                return await self._enrollment_repo.get_latest_by_candidate(
+                    candidate.id,
+                    [EnrollmentStatus.ACTIVE, EnrollmentStatus.REPLIED],
                 )
-                return result.scalar_one_or_none()
 
         return None
 
