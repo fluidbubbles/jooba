@@ -81,10 +81,11 @@ class TestClassify:
         )
 
     @pytest.mark.asyncio
-    async def test_body_text_preferred_over_body_html(self):
+    async def test_body_html_preferred_over_body_text(self):
+        """body_html is the full body; body_text is often a truncated Nylas snippet."""
         service = _build_service()
         service._event_repo.find_by_id.return_value = SimpleNamespace(
-            sentiment=None, body_text="plain text", body_html="<p>html</p>",
+            sentiment=None, body_text="truncated snippet", body_html="<p>full html body</p>",
         )
 
         with patch("app.services.classification_service.get_classifier") as mock_get:
@@ -94,13 +95,13 @@ class TestClassify:
 
             await service.classify(uuid4())
 
-            mock_classifier.classify.assert_called_once_with("plain text")
+            mock_classifier.classify.assert_called_once_with("<p>full html body</p>")
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_body_html_when_no_text(self):
+    async def test_falls_back_to_body_text_when_no_html(self):
         service = _build_service()
         service._event_repo.find_by_id.return_value = SimpleNamespace(
-            sentiment=None, body_text=None, body_html="<p>html</p>",
+            sentiment=None, body_text="plain text only", body_html=None,
         )
 
         with patch("app.services.classification_service.get_classifier") as mock_get:
@@ -110,7 +111,31 @@ class TestClassify:
 
             await service.classify(uuid4())
 
-            mock_classifier.classify.assert_called_once_with("<p>html</p>")
+            mock_classifier.classify.assert_called_once_with("plain text only")
+
+    @pytest.mark.asyncio
+    async def test_truncated_snippet_does_not_lose_keywords(self):
+        """Regression: Nylas snippet is often truncated, losing keywords that
+        exist in the full body. Classifier must use body_html (full) over
+        body_text (snippet) to avoid misclassification."""
+        service = _build_service()
+        event_id = uuid4()
+        service._event_repo.find_by_id.return_value = SimpleNamespace(
+            sentiment=None,
+            body_text="Thanks but I'm happy at Meta right now.",
+            body_html="Thanks but I'm happy at Meta right now. Not looking to move.",
+        )
+
+        with patch("app.services.classification_service.get_classifier") as mock_get:
+            mock_classifier = MagicMock()
+            mock_classifier.classify.return_value = ClassificationResult("not_interested", "decline")
+            mock_get.return_value = mock_classifier
+
+            await service.classify(event_id)
+
+            mock_classifier.classify.assert_called_once_with(
+                "Thanks but I'm happy at Meta right now. Not looking to move."
+            )
 
     @pytest.mark.asyncio
     async def test_empty_body_passes_empty_string(self):

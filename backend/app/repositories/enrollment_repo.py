@@ -12,16 +12,9 @@ from app.models.email_event import EmailEvent
 from app.models.enrollment import Enrollment
 from app.models.enums import EmailDirection, EnrollmentStatus, Sentiment
 from app.models.state_transition import StateTransition
+from app.utils.formatting import format_candidate_name
 
 logger = logging.getLogger(__name__)
-
-
-def _format_candidate_name(
-    first_name: str | None, last_name: str | None, email: str
-) -> str:
-    """Build a display name from name parts, falling back to the email local part."""
-    parts = [p for p in (first_name, last_name) if p]
-    return " ".join(parts) if parts else email.split("@")[0]
 
 
 def _latest_sentiment_subquery() -> Any:
@@ -154,6 +147,22 @@ class EnrollmentRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_latest_by_candidate(
+        self,
+        candidate_id: UUID,
+        statuses: list[EnrollmentStatus],
+    ) -> Enrollment | None:
+        """Get the most recent enrollment for a candidate in one of the given statuses."""
+        result = await self._db.execute(
+            select(Enrollment).where(
+                and_(
+                    Enrollment.candidate_id == candidate_id,
+                    Enrollment.status.in_([s.value for s in statuses]),
+                )
+            ).order_by(Enrollment.created_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def list_by_sequence(
         self,
         sequence_id: UUID,
@@ -193,7 +202,7 @@ class EnrollmentRepository:
         return [
             {
                 "id": row.id,
-                "candidate_name": _format_candidate_name(
+                "candidate_name": format_candidate_name(
                     row.first_name, row.last_name, row.email
                 ),
                 "candidate_email": row.email,

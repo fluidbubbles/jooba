@@ -10,7 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/dompurify": "^3.0.5",
     "@types/papaparse": "^5.5.2",
+    "dompurify": "^3.3.3",
     "lucide-react": "^1.6.0",
     "papaparse": "^5.5.3",
     "react": "^19.2.4",

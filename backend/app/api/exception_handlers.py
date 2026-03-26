@@ -4,8 +4,10 @@ from fastapi.responses import JSONResponse
 from app.services.exceptions import (
     CandidateNotFound,
     DomainError,
+    EmailEventNotFound,
     EnrollmentNotActive,
     InvalidStateTransition,
+    PermanentError,
     ProviderRateLimited,
     SequenceNotFound,
     TransientError,
@@ -55,11 +57,23 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         return _domain_error_response(exc, 503, headers={"Retry-After": str(exc.retry_after)})
 
+    @app.exception_handler(EmailEventNotFound)
+    async def email_event_not_found(
+        _request: Request, exc: EmailEventNotFound
+    ) -> JSONResponse:
+        return _domain_error_response(exc, 404)
+
     @app.exception_handler(TransientError)
     async def transient_error(
         _request: Request, exc: TransientError
     ) -> JSONResponse:
         return _domain_error_response(exc, 503)
+
+    @app.exception_handler(PermanentError)
+    async def permanent_error(
+        _request: Request, exc: PermanentError
+    ) -> JSONResponse:
+        return _domain_error_response(exc, 502)
 
     @app.exception_handler(DomainError)
     async def domain_error(_request: Request, exc: DomainError) -> JSONResponse:

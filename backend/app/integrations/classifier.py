@@ -1,0 +1,45 @@
+import logging
+from abc import ABC, abstractmethod
+
+from app.core.config import settings
+from app.integrations.openai_client import ClassificationResult, OpenAIClient
+
+logger = logging.getLogger(__name__)
+
+
+class Classifier(ABC):
+    @abstractmethod
+    def classify(self, reply_text: str) -> ClassificationResult:
+        ...
+
+
+class OpenAIClassifier(Classifier):
+    def __init__(self) -> None:
+        self.client = OpenAIClient()
+
+    def classify(self, reply_text: str) -> ClassificationResult:
+        return self.client.classify_reply(reply_text)
+
+
+class MockClassifier(Classifier):
+    """For testing — returns deterministic results based on keywords."""
+
+    def classify(self, reply_text: str) -> ClassificationResult:
+        text = reply_text.lower()
+        # Referral first — "not looking but talk to my colleague" is a referral, not a decline
+        if any(w in text for w in ["talk to", "refer", "colleague", "contact", "reach out to"]):
+            return ClassificationResult("referral", "Mock: detected referral keywords")
+        if any(w in text for w in ["not interested", "no thanks", "not looking", "happy where",
+                                    "happy at", "not right now", "pass on", "decline"]):
+            return ClassificationResult("not_interested", "Mock: detected decline keywords")
+        if any(w in text for w in ["interested", "love to", "let's chat", "schedule", "call"]):
+            return ClassificationResult("interested", "Mock: detected interest keywords")
+        return ClassificationResult("neutral", "Mock: no strong signal detected")
+
+
+def get_classifier() -> Classifier:
+    if settings.llm_provider == "mock":
+        return MockClassifier()
+    if settings.llm_provider != "openai":
+        logger.error("Unknown llm_provider %r — falling back to OpenAIClassifier", settings.llm_provider)
+    return OpenAIClassifier()
