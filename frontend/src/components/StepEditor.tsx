@@ -96,7 +96,7 @@ export default function StepEditor({
         ) : (
           <div className="space-y-2">
             <label htmlFor={`step-${index}-delay`} className="block text-xs font-medium text-gray-600">
-              Delay before send (minutes)
+              Delay before send (days)
             </label>
             <input
               id={`step-${index}-delay`}
