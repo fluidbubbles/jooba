@@ -57,19 +57,15 @@ async def _insert_nylas_account(
 ) -> None:
     """Ensure a Nylas account exists for direction detection.
 
-    If a real account already exists, returns its email instead.
+    Uses ON CONFLICT (email unique constraint) to avoid duplicates.
     """
     async with session_factory() as db:
-        existing = await db.execute(text("SELECT email FROM nylas_accounts LIMIT 1"))
-        row = existing.scalar_one_or_none()
-        if row:
-            return row
         await db.execute(text(
             "INSERT INTO nylas_accounts (id, grant_id, email, provider, connected_at) "
-            "VALUES (gen_random_uuid(), 'mock-grant', :email, 'mock', NOW())"
+            "VALUES (gen_random_uuid(), 'mock-grant', :email, 'mock', NOW()) "
+            "ON CONFLICT (email) DO NOTHING"
         ), {"email": email})
         await db.commit()
-        return email
 
 
 async def _insert_inbound_event(
