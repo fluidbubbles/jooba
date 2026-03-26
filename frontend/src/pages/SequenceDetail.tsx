@@ -169,11 +169,15 @@ export default function SequenceDetail() {
     setEnrollResult(result)
     setShowUploadModal(false)
     setRefreshKey((k) => k + 1)
-    if (id) void api.enrollments.analytics(id).then(setAnalytics)
+    if (id) {
+      void api.enrollments.analytics(id).then(setAnalytics).catch((e: unknown) => {
+        console.error('Failed to refresh analytics:', e)
+      })
+    }
     setTimeout(() => setEnrollResult(null), 5000)
   }
 
-  const applyStatus = async (next: SequenceStatus) => {
+  async function applyStatus(next: SequenceStatus) {
     if (!id || sequence?.id !== id) return
     const targetId = id
     const actionToken = ++latestStatusActionRef.current
@@ -339,7 +343,7 @@ export default function SequenceDetail() {
         )}
       </div>
 
-      {showUploadModal && id && (
+      {showUploadModal && (
         <CsvUploadModal
           sequenceId={id}
           onClose={() => setShowUploadModal(false)}
