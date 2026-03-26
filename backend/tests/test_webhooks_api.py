@@ -55,13 +55,21 @@ async def _insert_nylas_account(
     session_factory: async_sessionmaker[AsyncSession],
     email: str = RECRUITER_EMAIL,
 ) -> None:
-    """Insert a Nylas account so direction detection works."""
+    """Ensure a Nylas account exists for direction detection.
+
+    If a real account already exists, returns its email instead.
+    """
     async with session_factory() as db:
+        existing = await db.execute(text("SELECT email FROM nylas_accounts LIMIT 1"))
+        row = existing.scalar_one_or_none()
+        if row:
+            return row
         await db.execute(text(
             "INSERT INTO nylas_accounts (id, grant_id, email, provider, connected_at) "
             "VALUES (gen_random_uuid(), 'mock-grant', :email, 'mock', NOW())"
         ), {"email": email})
         await db.commit()
+        return email
 
 
 async def _seed_outbound_event(
@@ -246,14 +254,14 @@ class TestOutboundDetection:
         enrollment = await _enroll_candidate(client, seq_id, "candidate@example.com")
         enrollment_id = enrollment["id"]
 
-        await _insert_nylas_account(sf)
+        account_email = await _insert_nylas_account(sf)
         await _seed_outbound_event(sf, enrollment_id, thread_id="thread-outbound")
 
         # Recruiter sends a reply (same thread, sender = recruiter email)
         payload = _webhook_payload(
             message_id="msg-recruiter-reply-001",
             thread_id="thread-outbound",
-            sender_email=RECRUITER_EMAIL,
+            sender_email=account_email,
             subject="Re: Hi",
             body="<p>Following up</p>",
             snippet="Following up",
