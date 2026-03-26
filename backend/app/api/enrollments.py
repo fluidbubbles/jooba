@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -23,7 +23,7 @@ def get_enrollment_service(db: AsyncSession = Depends(get_db)) -> EnrollmentServ
 EnrollmentServiceDep = Annotated[EnrollmentService, Depends(get_enrollment_service)]
 
 
-@router.post("/{sequence_id}/enroll", response_model=EnrollResponse, status_code=201)
+@router.post("/{sequence_id}/enroll", response_model=EnrollResponse, status_code=status.HTTP_201_CREATED)
 async def enroll_candidates(
     sequence_id: UUID,
     data: EnrollRequest,
@@ -37,12 +37,12 @@ async def enroll_candidates(
 async def list_enrollments(
     sequence_id: UUID,
     service: EnrollmentServiceDep,
-    status: str | None = Query(None),
+    status_filter: str | None = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> PaginatedEnrollments:
     items, total = await service.list_enrollments(
-        sequence_id, status, limit, offset
+        sequence_id, status_filter, limit, offset
     )
     return PaginatedEnrollments(items=items, total=total)
 
