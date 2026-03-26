@@ -61,10 +61,9 @@ External APIs are behind interfaces. The service layer calls a `Classifier` or `
 ```python
 # config.py — swap providers with an env var
 email_provider: str = "nylas"      # nylas | mock
-llm_provider: str = "openai"       # openai | anthropic | mock
 ```
 
-This gives us: mock providers for testing (no API calls in CI), and the ability to swap OpenAI for Anthropic or Nylas for SendGrid by changing one line.
+OpenAI is used directly for classification. Email sending can be swapped between Nylas and a mock sender for local testing.
 
 ### Observer Pattern (via Celery Tasks)
 

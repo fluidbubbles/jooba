@@ -6,7 +6,7 @@ x-backend-service-env: &backend-service-env
   SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
   EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-  LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+
 
 services:
   db:
