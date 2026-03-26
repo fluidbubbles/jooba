@@ -39,6 +39,9 @@ export default function InboxPage() {
       if (repliesData.length > 0) {
         setSelectedId((prev) => prev ?? repliesData[0].id)
       }
+    }).catch((err) => {
+      console.error('Failed to load inbox replies', err)
+      if (loadTokenRef.current === token) setLoading(false)
     })
   }, [])
 
@@ -51,6 +54,8 @@ export default function InboxPage() {
     api.inbox.detail(id).then((data) => {
       if (detailTokenRef.current !== token) return
       setDetail(data)
+    }).catch((err) => {
+      console.error('Failed to load reply detail', err)
     })
   }, [])
 
@@ -74,9 +79,13 @@ export default function InboxPage() {
 
   const handleSendReply = async (bodyHtml: string) => {
     if (!selectedId) return
-    await api.inbox.sendReply(selectedId, bodyHtml)
-    const updated = await api.inbox.detail(selectedId)
-    setDetail(updated)
+    try {
+      await api.inbox.sendReply(selectedId, bodyHtml)
+      const updated = await api.inbox.detail(selectedId)
+      setDetail(updated)
+    } catch (err) {
+      console.error('Failed to send reply', err)
+    }
   }
 
   if (loading) {
