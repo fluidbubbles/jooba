@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import SequenceStatus
+from app.models.enums import EnrollmentStatus, SequenceStatus
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.enrollment_repo import EnrollmentRepository
 from app.repositories.sequence_repo import SequenceRepository
@@ -19,34 +20,41 @@ class EnrollmentService:
         self._enrollment_repo = EnrollmentRepository(db)
         self._sequence_repo = SequenceRepository(db)
 
-    async def enroll_candidates(
-        self, sequence_id: UUID, candidates: list[CandidateInput]
-    ) -> dict:
-        # Validate sequence exists and is active
+    async def _require_active_sequence(self, sequence_id: UUID) -> None:
+        """Raise if the sequence does not exist or is not active."""
         sequence = await self._sequence_repo.get_by_id(sequence_id)
         if not sequence:
-            raise SequenceNotFound(str(sequence_id))
+            raise SequenceNotFound(sequence_id)
         if sequence.status != SequenceStatus.ACTIVE.value:
             raise InvalidSequenceData(
                 f"Cannot enroll into a {sequence.status} sequence. Activate it first."
             )
 
-        # Deduplicate by email within the batch
-        seen_emails: set[str] = set()
-        unique_candidates: list[CandidateInput] = []
+    def _deduplicate_candidates(
+        self, candidates: list[CandidateInput]
+    ) -> list[CandidateInput]:
+        """Remove batch-level email duplicates, keeping first occurrence."""
+        seen: set[str] = set()
+        unique: list[CandidateInput] = []
         for c in candidates:
-            email_lower = c.email.lower().strip()
-            if email_lower not in seen_emails:
-                seen_emails.add(email_lower)
-                unique_candidates.append(c)
+            normalized = c.email.lower().strip()
+            if normalized not in seen:
+                seen.add(normalized)
+                unique.append(c)
+        return unique
+
+    async def enroll_candidates(
+        self, sequence_id: UUID, candidates: list[CandidateInput]
+    ) -> dict[str, int]:
+        await self._require_active_sequence(sequence_id)
+        unique_candidates = self._deduplicate_candidates(candidates)
 
         enrolled = 0
         skipped = 0
         now = datetime.now(timezone.utc)
 
         for c in unique_candidates:
-            # Get or create candidate
-            candidate, _is_new = await self._candidate_repo.get_or_create(
+            candidate, _ = await self._candidate_repo.get_or_create(
                 email=c.email,
                 first_name=c.first_name,
                 last_name=c.last_name,
@@ -54,7 +62,6 @@ class EnrollmentService:
                 title=c.title,
             )
 
-            # Check if already enrolled in this sequence
             existing = await self._enrollment_repo.get_by_candidate_and_sequence(
                 candidate.id, sequence_id
             )
@@ -62,10 +69,9 @@ class EnrollmentService:
                 skipped += 1
                 continue
 
-            # Generate unsubscribe token
             token = generate_unsubscribe_token(candidate.id, sequence_id)
 
-            # Create enrollment — step 0 delay = 0, so next_send_at = now
+            # Step 0 has delay = 0, so next_send_at = now
             enrollment = await self._enrollment_repo.create(
                 candidate_id=candidate.id,
                 sequence_id=sequence_id,
@@ -73,11 +79,10 @@ class EnrollmentService:
                 next_send_at=now,
             )
 
-            # Log state transition
             await self._enrollment_repo.log_transition(
                 enrollment_id=enrollment.id,
                 from_status=None,
-                to_status="active",
+                to_status=EnrollmentStatus.ACTIVE.value,
                 trigger="enrolled",
             )
             enrolled += 1
@@ -94,18 +99,16 @@ class EnrollmentService:
         status_filter: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Returns (items, total_count) for pagination."""
-        # Verify sequence exists
         sequence = await self._sequence_repo.get_by_id(sequence_id)
         if not sequence:
-            raise SequenceNotFound(str(sequence_id))
+            raise SequenceNotFound(sequence_id)
 
         total_steps = len(sequence.steps)
         items = await self._enrollment_repo.list_by_sequence(
             sequence_id, status_filter, limit, offset
         )
-        # Attach total_steps to each item
         for item in items:
             item["total_steps"] = total_steps
 
@@ -114,8 +117,8 @@ class EnrollmentService:
         )
         return items, total
 
-    async def get_analytics(self, sequence_id: UUID) -> dict:
+    async def get_analytics(self, sequence_id: UUID) -> dict[str, int]:
         sequence = await self._sequence_repo.get_by_id(sequence_id)
         if not sequence:
-            raise SequenceNotFound(str(sequence_id))
+            raise SequenceNotFound(sequence_id)
         return await self._enrollment_repo.get_analytics(sequence_id)

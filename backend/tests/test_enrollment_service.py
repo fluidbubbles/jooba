@@ -1,7 +1,5 @@
 from uuid import uuid4
 
-import pytest
-
 from app.utils.unsubscribe import generate_unsubscribe_token, verify_unsubscribe_token
 
 
