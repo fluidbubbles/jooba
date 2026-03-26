@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -5,6 +6,8 @@ from uuid import UUID
 from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.models.candidate import Candidate
 from app.models.email_event import EmailEvent
@@ -92,6 +95,11 @@ class EnrollmentRepository:
             existing = await self.get_by_candidate_and_sequence(candidate_id, sequence_id)
             if existing is not None:
                 return existing, False
+            logger.error(
+                "Unexpected IntegrityError in create_if_not_exists "
+                "candidate_id=%s sequence_id=%s",
+                candidate_id, sequence_id,
+            )
             raise
 
     async def get_by_id(self, enrollment_id: UUID) -> Enrollment | None:
@@ -231,14 +239,14 @@ class EnrollmentRepository:
     async def log_transition(
         self,
         enrollment_id: UUID,
-        from_status: str | None,
-        to_status: str,
+        from_status: EnrollmentStatus | None,
+        to_status: EnrollmentStatus,
         trigger: str,
     ) -> None:
         transition = StateTransition(
             enrollment_id=enrollment_id,
-            from_status=from_status,
-            to_status=to_status,
+            from_status=from_status.value if from_status else None,
+            to_status=to_status.value,
             trigger=trigger,
         )
         self._db.add(transition)

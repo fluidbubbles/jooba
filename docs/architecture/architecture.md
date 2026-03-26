@@ -193,6 +193,7 @@ Every database query is isolated in a repository class. Services never import SQ
 ```
 EnrollmentRepository (Plan 3)
 ├── create(candidate_id, sequence_id, unsubscribe_token, next_send_at) → Enrollment
+├── create_if_not_exists(candidate_id, sequence_id, ...) → tuple[Enrollment, bool]
 ├── get_by_id(id) → Enrollment | None
 ├── get_by_candidate_and_sequence(candidate_id, sequence_id) → Enrollment | None
 ├── list_by_sequence(sequence_id, status_filter, limit, offset) → list[dict]

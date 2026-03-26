@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from sqlalchemy import select
@@ -5,6 +6,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import Candidate
+
+logger = logging.getLogger(__name__)
 
 
 class CandidateRepository:
@@ -49,7 +52,12 @@ class CandidateRepository:
         return candidate
 
     async def get_or_create(
-        self, email: str, **kwargs: str | None
+        self,
+        email: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        company: str | None = None,
+        title: str | None = None,
     ) -> tuple[Candidate, bool]:
         """Returns (candidate, is_new)."""
         existing = await self.get_by_email(email)
@@ -58,12 +66,17 @@ class CandidateRepository:
 
         try:
             async with self._db.begin_nested():
-                created = await self.create(email=email, **kwargs)
+                created = await self.create(
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    company=company,
+                    title=title,
+                )
             return created, True
         except IntegrityError:
-            # Another concurrent transaction may have inserted the same normalized
-            # email between our lookup and insert.
             existing = await self.get_by_email(email)
             if existing is not None:
                 return existing, False
+            logger.error("Unexpected IntegrityError in get_or_create for email=%s", email)
             raise

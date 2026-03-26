@@ -167,7 +167,7 @@ class TestEnrollmentService:
             ],
         )
 
-        assert result == {"enrolled": 0, "skipped": 1, "total": 2}
+        assert result == {"enrolled": 0, "skipped": 1, "total": 1}
         service._candidate_repo.get_or_create.assert_awaited_once()
         service._enrollment_repo.log_transition.assert_not_awaited()
 

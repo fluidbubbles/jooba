@@ -23,13 +23,13 @@ class CandidateInput(BaseModel):
 class EnrollRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    candidates: list[CandidateInput] = Field(..., min_length=1)
+    candidates: list[CandidateInput] = Field(..., min_length=1, max_length=1000)
 
 
 class EnrollResponse(BaseModel):
-    enrolled: int
-    skipped: int
-    total: int
+    enrolled: int = Field(ge=0)
+    skipped: int = Field(ge=0)
+    total: int = Field(ge=0)
 
 
 class EnrollmentListItem(_OrmSchema):

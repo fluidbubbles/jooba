@@ -47,7 +47,7 @@ class TestEnrollCandidates:
         body = response.json()
         assert body["enrolled"] == 1
         assert body["skipped"] == 0
-        assert body["total"] == 2
+        assert body["total"] == 1
 
     @pytest.mark.asyncio
     async def test_enroll_skips_already_enrolled(self, client: AsyncClient) -> None:
@@ -135,6 +135,20 @@ class TestListEnrollments:
         assert item["candidate_name"] == "Jane Chen"
         assert item["status"] == "active"
         assert item["current_step"] == 0
+
+    @pytest.mark.asyncio
+    async def test_candidate_name_falls_back_to_email_local_part(
+        self, client: AsyncClient
+    ) -> None:
+        seq_id = await _create_active_sequence(client)
+        await client.post(f"/api/sequences/{seq_id}/enroll", json={
+            "candidates": [{"email": "noname@example.com"}],
+        })
+        response = await client.get(f"/api/sequences/{seq_id}/enrollments")
+        assert response.status_code == 200
+        item = response.json()["items"][0]
+        assert item["candidate_name"] == "noname"
+        assert item["candidate_email"] == "noname@example.com"
 
     @pytest.mark.asyncio
     async def test_list_enrollments_404_for_missing_sequence(self, client: AsyncClient) -> None:

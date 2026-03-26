@@ -12,7 +12,7 @@ export interface SequenceStep {
   step_order: number
   subject: string
   body_html: string
-  /** Delay in minutes (API field name `delay`). */
+  /** Delay before sending this step, in minutes. Stored as delay_minutes in DB; mapped to delay in the API schema. */
   delay: number
 }
 

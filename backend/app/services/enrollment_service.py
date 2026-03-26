@@ -1,10 +1,13 @@
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import EnrollmentStatus, SequenceStatus
+
+if TYPE_CHECKING:
+    from app.models.sequence import Sequence
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.enrollment_repo import EnrollmentRepository
 from app.repositories.sequence_repo import SequenceRepository
@@ -20,7 +23,7 @@ class EnrollmentService:
         self._enrollment_repo = EnrollmentRepository(db)
         self._sequence_repo = SequenceRepository(db)
 
-    async def _get_sequence_or_raise(self, sequence_id: UUID) -> Any:
+    async def _get_sequence_or_raise(self, sequence_id: UUID) -> "Sequence":
         sequence = await self._sequence_repo.get_by_id(sequence_id)
         if sequence is None:
             raise SequenceNotFound(sequence_id)
@@ -84,7 +87,7 @@ class EnrollmentService:
             await self._enrollment_repo.log_transition(
                 enrollment_id=enrollment.id,
                 from_status=None,
-                to_status=EnrollmentStatus.ACTIVE.value,
+                to_status=EnrollmentStatus.ACTIVE,
                 trigger="enrolled",
             )
             enrolled += 1
@@ -92,7 +95,7 @@ class EnrollmentService:
         return {
             "enrolled": enrolled,
             "skipped": skipped,
-            "total": len(candidates),
+            "total": len(unique_candidates),
         }
 
     async def list_enrollments(
