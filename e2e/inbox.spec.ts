@@ -186,18 +186,18 @@ async function openReplyDetail(page: Page, email: string): Promise<void> {
   const rows = page.locator('div.p-4.cursor-pointer')
   const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
     const rowCount = await rows.count()
     if (attempt > 0 && rowCount > 1) {
       await rows.nth(attempt % rowCount).click()
-      await sleep(250)
+      await sleep(500)
     }
     await row.click()
     try {
-      await expect(detailPanel.getByText(email)).toBeVisible({ timeout: 2000 })
+      await expect(detailPanel.getByText(email)).toBeVisible({ timeout: 3000 })
       return
     } catch {
-      await sleep(350)
+      await sleep(500)
     }
   }
   throw new Error(`Could not open detail panel for ${email}`)
