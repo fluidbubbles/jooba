@@ -86,7 +86,7 @@ class OpenAIClient:
         """Classify a candidate reply using the configured OpenAI model."""
         response = self._chat_completion(
             user_content=CLASSIFY_PROMPT.format(reply_text=reply_text),
-            max_tokens=150,
+            max_tokens=800,
         )
 
         raw_content = response.choices[0].message.content
@@ -106,7 +106,7 @@ class OpenAIClient:
         """Extract referred contact info from a referral reply."""
         response = self._chat_completion(
             user_content=EXTRACT_REFERRAL_PROMPT.format(reply_text=reply_text),
-            max_tokens=200,
+            max_tokens=800,
         )
 
         raw_content = response.choices[0].message.content

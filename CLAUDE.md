@@ -101,6 +101,7 @@ Use these defaults unless the user explicitly overrides. These rules apply to al
 - **Aggregation query rule:** Count concrete columns (for example `SequenceStep.id`), not relationship attributes; avoid N+1 loops for list counters.
 - **Testing rule:** API integration tests must run with an isolated DB dependency override/fixture; service tests should assert behaviors and exception paths, not only constants.
 - **Regression test rule:** When a bug or issue is identified, add a regression test that reproduces the failure. Then have subagents try to fix the bug and prove it with a passing test.
+- **Mock providers are for automated tests only:** Never switch to `LLM_PROVIDER=mock` or `EMAIL_PROVIDER=mock` during manual testing or debugging. Manual testing must use real provider calls (OpenAI, Nylas) so behavior matches production. Mock providers exist solely for `pytest` and Playwright e2e suites.
 - **No inline imports:** All imports must be at the top of the file. Never use inline/local imports inside functions or methods.
 - **No `from __future__ import annotations`:** The project targets Python 3.13+. PEP 604 unions (`X | Y`) and forward references work natively. Do not add `from __future__ import annotations`.
 - **Service DI:** Services receive repositories via constructor injection. For single-repo services use `Service(repo)`. For multi-repo services (e.g. `EnrollmentService`) the API factory may pass the session and let the service construct its repos internally — but services must still avoid importing SQLAlchemy types in their business logic.
