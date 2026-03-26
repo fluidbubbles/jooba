@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from httpx import AsyncClient
 
@@ -44,6 +46,7 @@ class TestEnrollCandidates:
         assert response.status_code == 201
         body = response.json()
         assert body["enrolled"] == 1
+        assert body["skipped"] == 0
         assert body["total"] == 2
 
     @pytest.mark.asyncio
@@ -89,6 +92,28 @@ class TestEnrollCandidates:
         )
         assert response.status_code == 404
         assert response.json()["code"] == "SEQUENCE_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_enroll_same_candidate_is_idempotent(
+        self, client: AsyncClient
+    ) -> None:
+        seq_id = await _create_active_sequence(client)
+        payload = {"candidates": [{"email": "race@example.com"}]}
+
+        responses = await asyncio.gather(
+            client.post(f"/api/sequences/{seq_id}/enroll", json=payload),
+            client.post(f"/api/sequences/{seq_id}/enroll", json=payload),
+        )
+
+        assert all(response.status_code == 201 for response in responses)
+        enrolled_counts = sorted(response.json()["enrolled"] for response in responses)
+        skipped_counts = sorted(response.json()["skipped"] for response in responses)
+        assert enrolled_counts == [0, 1]
+        assert skipped_counts == [0, 1]
+
+        list_response = await client.get(f"/api/sequences/{seq_id}/enrollments")
+        assert list_response.status_code == 200
+        assert list_response.json()["total"] == 1
 
 
 class TestListEnrollments:
@@ -136,6 +161,53 @@ class TestListEnrollments:
         assert response.json()["total"] == 0
 
     @pytest.mark.asyncio
+    async def test_list_enrollments_status_all_matches_unfiltered(
+        self, client: AsyncClient
+    ) -> None:
+        seq_id = await _create_active_sequence(client)
+        await client.post(f"/api/sequences/{seq_id}/enroll", json={
+            "candidates": [{"email": "all@test.com"}],
+        })
+
+        unfiltered_response = await client.get(f"/api/sequences/{seq_id}/enrollments")
+        all_response = await client.get(f"/api/sequences/{seq_id}/enrollments?status=all")
+
+        assert unfiltered_response.status_code == 200
+        assert all_response.status_code == 200
+        assert all_response.json() == unfiltered_response.json()
+
+    @pytest.mark.asyncio
+    async def test_list_enrollments_limit_offset_paginates_items_only(
+        self, client: AsyncClient
+    ) -> None:
+        seq_id = await _create_active_sequence(client)
+        await client.post(f"/api/sequences/{seq_id}/enroll", json={
+            "candidates": [
+                {"email": "page1@test.com"},
+                {"email": "page2@test.com"},
+                {"email": "page3@test.com"},
+            ],
+        })
+
+        response = await client.get(
+            f"/api/sequences/{seq_id}/enrollments?status=all&limit=1&offset=1"
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 3
+        assert len(body["items"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_list_enrollments_rejects_invalid_status_filter(
+        self, client: AsyncClient
+    ) -> None:
+        seq_id = await _create_active_sequence(client)
+        response = await client.get(
+            f"/api/sequences/{seq_id}/enrollments?status=not-a-status"
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
     async def test_list_empty_for_new_sequence(self, client: AsyncClient) -> None:
         seq_id = await _create_active_sequence(client)
         response = await client.get(f"/api/sequences/{seq_id}/enrollments")
@@ -172,3 +244,4 @@ class TestSequenceAnalytics:
             "/api/sequences/00000000-0000-0000-0000-000000000099/analytics"
         )
         assert response.status_code == 404
+        assert response.json()["code"] == "SEQUENCE_NOT_FOUND"

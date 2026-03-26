@@ -44,5 +44,6 @@ class Enrollment(Base):
 
     __table_args__ = (
         Index("ix_enrollments_status_next_send", "status", "next_send_at"),
+        Index("ix_enrollments_sequence_created_id", "sequence_id", "created_at", "id"),
         UniqueConstraint("candidate_id", "sequence_id", name="uq_enrollment_candidate_sequence"),
     )

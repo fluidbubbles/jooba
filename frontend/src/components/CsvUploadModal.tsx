@@ -18,23 +18,68 @@ const ALIAS_MAP: Record<string, string[]> = {
   title: ['title', 'job_title', 'jobtitle', 'position'],
 }
 
-function findColumn(row: Record<string, string>, fields: string[], aliases: string[]): string | null {
-  for (const alias of aliases) {
-    const match = fields.find((f) => f.toLowerCase().trim() === alias)
-    if (match && row[match]?.trim()) return row[match].trim()
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function normalizeColumnName(value: string): string {
+  return value.toLowerCase().trim()
+}
+
+function buildFieldLookup(fields: string[]): Map<string, string> {
+  const lookup = new Map<string, string>()
+  for (const field of fields) {
+    const normalized = normalizeColumnName(field)
+    if (!lookup.has(normalized)) {
+      lookup.set(normalized, field)
+    }
+  }
+  return lookup
+}
+
+function findRequiredColumn(fields: string[], aliases: string[]): string | null {
+  for (const field of fields) {
+    if (aliases.includes(normalizeColumnName(field))) {
+      return field
+    }
   }
   return null
+}
+
+function findColumnValue(
+  row: Record<string, string>,
+  fieldLookup: Map<string, string>,
+  aliases: string[],
+): string | null {
+  for (const alias of aliases) {
+    const column = fieldLookup.get(alias)
+    if (!column) {
+      continue
+    }
+    const value = row[column]?.trim()
+    if (value) {
+      return value
+    }
+  }
+  return null
+}
+
+function isValidEmail(value: string): boolean {
+  return EMAIL_PATTERN.test(value)
 }
 
 export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
   const [candidates, setCandidates] = useState<CandidateInput[]>([])
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)
   const [enrolling, setEnrolling] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const modalRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
 
   const parseFile = useCallback((file: File) => {
     setError(null)
+    setWarning(null)
     setFileName(file.name)
 
     Papa.parse(file, {
@@ -42,10 +87,8 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
       skipEmptyLines: true,
       complete: (results) => {
         const fields = results.meta.fields || []
-
-        const emailCol = fields.find((f) =>
-          ALIAS_MAP.email.includes(f.toLowerCase().trim()),
-        )
+        const fieldLookup = buildFieldLookup(fields)
+        const emailCol = findRequiredColumn(fields, ALIAS_MAP.email)
 
         if (!emailCol) {
           setError(
@@ -55,25 +98,41 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
         }
 
         const rows: CandidateInput[] = []
+        let invalidEmailRows = 0
         for (const row of results.data as Record<string, string>[]) {
           const email = row[emailCol]?.trim()
           if (!email) continue
+          if (!isValidEmail(email)) {
+            invalidEmailRows += 1
+            continue
+          }
 
           rows.push({
             email,
-            first_name: findColumn(row, fields, ALIAS_MAP.first_name) || undefined,
-            last_name: findColumn(row, fields, ALIAS_MAP.last_name) || undefined,
-            company: findColumn(row, fields, ALIAS_MAP.company) || undefined,
-            title: findColumn(row, fields, ALIAS_MAP.title) || undefined,
+            first_name: findColumnValue(row, fieldLookup, ALIAS_MAP.first_name) || undefined,
+            last_name: findColumnValue(row, fieldLookup, ALIAS_MAP.last_name) || undefined,
+            company: findColumnValue(row, fieldLookup, ALIAS_MAP.company) || undefined,
+            title: findColumnValue(row, fieldLookup, ALIAS_MAP.title) || undefined,
           })
         }
 
         if (rows.length === 0) {
-          setError('No valid rows found. Make sure the CSV has at least one row with an email.')
+          if (invalidEmailRows > 0) {
+            setError(
+              `No valid rows found. ${invalidEmailRows} row(s) had invalid email format.`,
+            )
+          } else {
+            setError('No valid rows found. Make sure the CSV has at least one row with an email.')
+          }
           return
         }
 
         setCandidates(rows)
+        if (invalidEmailRows > 0) {
+          setWarning(
+            `${invalidEmailRows} row(s) were skipped because they had invalid email format.`,
+          )
+        }
       },
       error: () => {
         setError('Could not parse this file. Make sure it is a valid CSV.')
@@ -98,23 +157,64 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
       onEnrolled(result)
     } catch (err: unknown) {
       console.error('Failed to enroll candidates:', err)
-      setError(err instanceof ApiRequestError ? err.message : 'Failed to enroll candidates')
+      if (err instanceof ApiRequestError && err.status === 422) {
+        setError('Some candidate rows are invalid. Check emails and field values, then try again.')
+      } else {
+        setError(err instanceof ApiRequestError ? err.message : 'Failed to enroll candidates')
+      }
       setEnrolling(false)
     }
   }
 
   useEffect(() => {
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    closeButtonRef.current?.focus()
+
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+
+      if (e.key !== 'Tab' || !modalRef.current) return
+
+      const focusable = Array.from(
+        modalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]',
+        ),
+      ).filter((element) => {
+        if (element.getAttribute('tabindex') === '-1') return false
+        if (element.hasAttribute('disabled')) return false
+        if (element.getAttribute('aria-hidden') === 'true') return false
+        return element.getClientRects().length > 0
+      })
+      if (focusable.length === 0) return
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      if (e.shiftKey && active === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
     }
+
     document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      previousFocusRef.current?.focus()
+    }
   }, [onClose])
 
   function reset() {
     setCandidates([])
     setFileName('')
     setError(null)
+    setWarning(null)
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -124,6 +224,7 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
+        ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-label="Enroll candidates from CSV"
@@ -132,6 +233,7 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Enroll Candidates</h2>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close dialog"
@@ -142,6 +244,16 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
+          {warning && (
+            <div
+              role="status"
+              className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3"
+            >
+              <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+              <p className="text-sm text-amber-800">{warning}</p>
+            </div>
+          )}
+
           {error && (
             <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-500" />
@@ -161,29 +273,34 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
           )}
 
           {candidates.length === 0 && !error && (
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              onClick={() => fileRef.current?.click()}
-              className="cursor-pointer rounded-xl border-2 border-dashed border-gray-300 p-10 text-center transition-colors hover:border-blue-400"
-            >
-              <Upload size={32} className="mx-auto mb-3 text-gray-400" />
-              <p className="mb-1 text-gray-700">Drag & drop a CSV file here</p>
-              <p className="text-sm text-gray-500">or click to browse</p>
-              <p className="mt-4 text-xs text-gray-400">
-                Expected columns: email (required), first_name, last_name, company, title
-              </p>
+            <>
+              <button
+                type="button"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+                onClick={() => fileRef.current?.click()}
+                className="cursor-pointer rounded-xl border-2 border-dashed border-gray-300 p-10 text-center transition-colors hover:border-blue-400"
+              >
+                <Upload size={32} className="mx-auto mb-3 text-gray-400" />
+                <p className="mb-1 text-gray-700">Drag & drop a CSV file here</p>
+                <p className="text-sm text-gray-500">or click to browse</p>
+                <p className="mt-4 text-xs text-gray-400">
+                  Expected columns: email (required), first_name, last_name, company, title
+                </p>
+              </button>
               <input
                 ref={fileRef}
                 type="file"
                 accept=".csv"
+                tabIndex={-1}
+                aria-hidden="true"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0]
                   if (file) parseFile(file)
                 }}
               />
-            </div>
+            </>
           )}
 
           {candidates.length > 0 && (

@@ -3,6 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import Candidate
@@ -62,6 +63,37 @@ class EnrollmentRepository:
         await self._db.flush()
         return enrollment
 
+    async def create_if_not_exists(
+        self,
+        candidate_id: UUID,
+        sequence_id: UUID,
+        unsubscribe_token: str,
+        next_send_at: datetime,
+    ) -> tuple[Enrollment, bool]:
+        """Create enrollment if absent.
+
+        Returns (enrollment, is_new). If another transaction creates the same
+        candidate+sequence row concurrently, returns the existing enrollment.
+        """
+        existing = await self.get_by_candidate_and_sequence(candidate_id, sequence_id)
+        if existing is not None:
+            return existing, False
+
+        try:
+            async with self._db.begin_nested():
+                enrollment = await self.create(
+                    candidate_id=candidate_id,
+                    sequence_id=sequence_id,
+                    unsubscribe_token=unsubscribe_token,
+                    next_send_at=next_send_at,
+                )
+            return enrollment, True
+        except IntegrityError:
+            existing = await self.get_by_candidate_and_sequence(candidate_id, sequence_id)
+            if existing is not None:
+                return existing, False
+            raise
+
     async def get_by_id(self, enrollment_id: UUID) -> Enrollment | None:
         result = await self._db.execute(
             select(Enrollment).where(Enrollment.id == enrollment_id)
@@ -84,7 +116,7 @@ class EnrollmentRepository:
     async def list_by_sequence(
         self,
         sequence_id: UUID,
-        status_filter: str | None = None,
+        status_filter: EnrollmentStatus | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -106,10 +138,14 @@ class EnrollmentRepository:
             .where(Enrollment.sequence_id == sequence_id)
         )
 
-        if status_filter and status_filter != "all":
-            stmt = stmt.where(Enrollment.status == status_filter)
+        if status_filter is not None:
+            stmt = stmt.where(Enrollment.status == status_filter.value)
 
-        stmt = stmt.order_by(Enrollment.created_at.desc()).limit(limit).offset(offset)
+        stmt = (
+            stmt.order_by(Enrollment.created_at.desc(), Enrollment.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         result = await self._db.execute(stmt)
         rows = result.all()
 
@@ -129,13 +165,13 @@ class EnrollmentRepository:
         ]
 
     async def count_by_sequence(
-        self, sequence_id: UUID, status_filter: str | None = None
+        self, sequence_id: UUID, status_filter: EnrollmentStatus | None = None
     ) -> int:
         stmt = select(func.count(Enrollment.id)).where(
             Enrollment.sequence_id == sequence_id
         )
-        if status_filter and status_filter != "all":
-            stmt = stmt.where(Enrollment.status == status_filter)
+        if status_filter is not None:
+            stmt = stmt.where(Enrollment.status == status_filter.value)
         result = await self._db.execute(stmt)
         return result.scalar_one()
 

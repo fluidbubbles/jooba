@@ -29,13 +29,14 @@ def generate_unsubscribe_token(candidate_id: UUID, sequence_id: UUID) -> str:
 def verify_unsubscribe_token(token: str) -> tuple[UUID, UUID] | None:
     """Verify and extract candidate_id + sequence_id from token.
 
-    Returns (candidate_id, sequence_id) if valid, None if tampered.
+    Returns (candidate_id, sequence_id) if valid, None if malformed,
+    signature-mismatched, or containing invalid UUID values.
     """
-    parts = token.split(":")
-    if len(parts) != 3:
+    try:
+        candidate_str, sequence_str, provided_sig = token.split(":")
+    except ValueError:
         return None
 
-    candidate_str, sequence_str, provided_sig = parts
     expected_sig = _sign(f"{candidate_str}:{sequence_str}")
 
     if not hmac.compare_digest(provided_sig, expected_sig):

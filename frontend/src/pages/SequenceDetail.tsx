@@ -118,17 +118,35 @@ export default function SequenceDetail() {
   const [enrollResult, setEnrollResult] = useState<EnrollResponse | null>(null)
   const latestLoadRef = useRef(0)
   const latestStatusActionRef = useRef(0)
+  const latestAnalyticsRefreshRef = useRef(0)
+  const enrollToastTimerRef = useRef<number | null>(null)
   const activeRouteIdRef = useRef<string | undefined>(id)
+
+  const clearEnrollToastTimer = useCallback(() => {
+    if (enrollToastTimerRef.current !== null) {
+      window.clearTimeout(enrollToastTimerRef.current)
+      enrollToastTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      clearEnrollToastTimer()
+    }
+  }, [clearEnrollToastTimer])
 
   useEffect(() => {
     activeRouteIdRef.current = id
     latestStatusActionRef.current += 1
+    latestAnalyticsRefreshRef.current += 1
+    clearEnrollToastTimer()
     setSequence(null)
     setLoading(true)
     setLoadError(null)
     setStatusBusy(false)
     setActionError(null)
-  }, [id])
+    setEnrollResult(null)
+  }, [id, clearEnrollToastTimer])
 
   const loadSequence = useCallback(async () => {
     if (!id) return
@@ -166,15 +184,27 @@ export default function SequenceDetail() {
   )
 
   function handleEnrolled(result: EnrollResponse) {
+    if (!id) return
+    const targetId = id
     setEnrollResult(result)
     setShowUploadModal(false)
     setRefreshKey((k) => k + 1)
-    if (id) {
-      void api.enrollments.analytics(id).then(setAnalytics).catch((e: unknown) => {
-        console.error('Failed to refresh analytics:', e)
-      })
-    }
-    setTimeout(() => setEnrollResult(null), 5000)
+
+    const refreshToken = ++latestAnalyticsRefreshRef.current
+    void api.enrollments.analytics(targetId).then((analyticsData) => {
+      if (isOutdatedRequest(refreshToken, targetId, latestAnalyticsRefreshRef, activeRouteIdRef)) {
+        return
+      }
+      setAnalytics(analyticsData)
+    }).catch((e: unknown) => {
+      console.error('Failed to refresh analytics:', e)
+    })
+
+    clearEnrollToastTimer()
+    enrollToastTimerRef.current = window.setTimeout(() => {
+      setEnrollResult(null)
+      enrollToastTimerRef.current = null
+    }, 5000)
   }
 
   async function applyStatus(next: SequenceStatus) {
@@ -256,7 +286,7 @@ export default function SequenceDetail() {
                 <StatusBadge status={sequence.status} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {(sequence.status === 'active' || sequence.status === 'paused') && (
+                {sequence.status === 'active' && (
                   <button
                     type="button"
                     className={BTN_SECONDARY}
@@ -335,7 +365,9 @@ export default function SequenceDetail() {
               </h2>
               <CandidatesTable
                 sequenceId={id}
-                onUploadCsv={() => setShowUploadModal(true)}
+                onUploadCsv={
+                  sequence.status === 'active' ? () => setShowUploadModal(true) : undefined
+                }
                 refreshKey={refreshKey}
               />
             </section>

@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.candidate import Candidate
@@ -10,9 +11,14 @@ class CandidateRepository:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
+    @staticmethod
+    def _normalize_email(email: str) -> str:
+        return email.strip().lower()
+
     async def get_by_email(self, email: str) -> Candidate | None:
+        normalized_email = self._normalize_email(email)
         result = await self._db.execute(
-            select(Candidate).where(Candidate.email == email.strip().lower())
+            select(Candidate).where(Candidate.email == normalized_email)
         )
         return result.scalar_one_or_none()
 
@@ -30,8 +36,9 @@ class CandidateRepository:
         company: str | None = None,
         title: str | None = None,
     ) -> Candidate:
+        normalized_email = self._normalize_email(email)
         candidate = Candidate(
-            email=email.lower().strip(),
+            email=normalized_email,
             first_name=first_name,
             last_name=last_name,
             company=company,
@@ -46,7 +53,17 @@ class CandidateRepository:
     ) -> tuple[Candidate, bool]:
         """Returns (candidate, is_new)."""
         existing = await self.get_by_email(email)
-        if existing:
+        if existing is not None:
             return existing, False
-        created = await self.create(email=email, **kwargs)
-        return created, True
+
+        try:
+            async with self._db.begin_nested():
+                created = await self.create(email=email, **kwargs)
+            return created, True
+        except IntegrityError:
+            # Another concurrent transaction may have inserted the same normalized
+            # email between our lookup and insert.
+            existing = await self.get_by_email(email)
+            if existing is not None:
+                return existing, False
+            raise

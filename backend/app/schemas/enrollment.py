@@ -11,11 +11,13 @@ class _OrmSchema(BaseModel):
 
 
 class CandidateInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     email: EmailStr
-    first_name: str | None = None
-    last_name: str | None = None
-    company: str | None = None
-    title: str | None = None
+    first_name: str | None = Field(default=None, min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, min_length=1, max_length=100)
+    company: str | None = Field(default=None, min_length=1, max_length=255)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class EnrollRequest(BaseModel):

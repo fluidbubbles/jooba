@@ -20,11 +20,15 @@ class EnrollmentService:
         self._enrollment_repo = EnrollmentRepository(db)
         self._sequence_repo = SequenceRepository(db)
 
+    async def _get_sequence_or_raise(self, sequence_id: UUID) -> Any:
+        sequence = await self._sequence_repo.get_by_id(sequence_id)
+        if sequence is None:
+            raise SequenceNotFound(sequence_id)
+        return sequence
+
     async def _require_active_sequence(self, sequence_id: UUID) -> None:
         """Raise if the sequence does not exist or is not active."""
-        sequence = await self._sequence_repo.get_by_id(sequence_id)
-        if not sequence:
-            raise SequenceNotFound(sequence_id)
+        sequence = await self._get_sequence_or_raise(sequence_id)
         if sequence.status != SequenceStatus.ACTIVE.value:
             raise InvalidSequenceData(
                 f"Cannot enroll into a {sequence.status} sequence. Activate it first."
@@ -36,11 +40,13 @@ class EnrollmentService:
         """Remove batch-level email duplicates, keeping first occurrence."""
         seen: set[str] = set()
         unique: list[CandidateInput] = []
-        for c in candidates:
-            normalized = c.email.lower().strip()
-            if normalized not in seen:
-                seen.add(normalized)
-                unique.append(c)
+        for candidate_input in candidates:
+            normalized_email = candidate_input.email.lower().strip()
+            if normalized_email in seen:
+                continue
+
+            seen.add(normalized_email)
+            unique.append(candidate_input)
         return unique
 
     async def enroll_candidates(
@@ -53,31 +59,27 @@ class EnrollmentService:
         skipped = 0
         now = datetime.now(timezone.utc)
 
-        for c in unique_candidates:
+        for candidate_input in unique_candidates:
             candidate, _ = await self._candidate_repo.get_or_create(
-                email=c.email,
-                first_name=c.first_name,
-                last_name=c.last_name,
-                company=c.company,
-                title=c.title,
+                email=candidate_input.email,
+                first_name=candidate_input.first_name,
+                last_name=candidate_input.last_name,
+                company=candidate_input.company,
+                title=candidate_input.title,
             )
-
-            existing = await self._enrollment_repo.get_by_candidate_and_sequence(
-                candidate.id, sequence_id
-            )
-            if existing:
-                skipped += 1
-                continue
 
             token = generate_unsubscribe_token(candidate.id, sequence_id)
 
             # Step 0 has delay = 0, so next_send_at = now
-            enrollment = await self._enrollment_repo.create(
+            enrollment, is_new = await self._enrollment_repo.create_if_not_exists(
                 candidate_id=candidate.id,
                 sequence_id=sequence_id,
                 unsubscribe_token=token,
                 next_send_at=now,
             )
+            if not is_new:
+                skipped += 1
+                continue
 
             await self._enrollment_repo.log_transition(
                 enrollment_id=enrollment.id,
@@ -96,14 +98,12 @@ class EnrollmentService:
     async def list_enrollments(
         self,
         sequence_id: UUID,
-        status_filter: str | None = None,
+        status_filter: EnrollmentStatus | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
         """Returns (items, total_count) for pagination."""
-        sequence = await self._sequence_repo.get_by_id(sequence_id)
-        if not sequence:
-            raise SequenceNotFound(sequence_id)
+        sequence = await self._get_sequence_or_raise(sequence_id)
 
         total_steps = len(sequence.steps)
         items = await self._enrollment_repo.list_by_sequence(
@@ -118,7 +118,5 @@ class EnrollmentService:
         return items, total
 
     async def get_analytics(self, sequence_id: UUID) -> dict[str, int]:
-        sequence = await self._sequence_repo.get_by_id(sequence_id)
-        if not sequence:
-            raise SequenceNotFound(sequence_id)
+        await self._get_sequence_or_raise(sequence_id)
         return await self._enrollment_repo.get_analytics(sequence_id)
