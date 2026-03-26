@@ -1,5 +1,7 @@
+from unittest.mock import patch
+
 import pytest
-from app.integrations.classifier import MockClassifier
+from app.integrations.classifier import MockClassifier, OpenAIClassifier, get_classifier
 from app.integrations.openai_client import ClassificationResult
 from app.models.enums import Sentiment
 
@@ -74,3 +76,23 @@ class TestSentimentEnum:
 
     def test_enum_has_exactly_four_members(self):
         assert len(Sentiment) == 4
+
+
+class TestGetClassifierFactory:
+    @patch("app.integrations.classifier.settings")
+    def test_mock_provider_returns_mock_classifier(self, mock_settings):
+        mock_settings.llm_provider = "mock"
+        assert isinstance(get_classifier(), MockClassifier)
+
+    @patch("app.integrations.classifier.settings")
+    def test_openai_provider_returns_openai_classifier(self, mock_settings):
+        mock_settings.llm_provider = "openai"
+        mock_settings.openai_api_key = "test-key"
+        assert isinstance(get_classifier(), OpenAIClassifier)
+
+    @patch("app.integrations.classifier.settings")
+    def test_unknown_provider_falls_back_to_openai(self, mock_settings):
+        mock_settings.llm_provider = "typo"
+        mock_settings.openai_api_key = "test-key"
+        result = get_classifier()
+        assert isinstance(result, OpenAIClassifier)

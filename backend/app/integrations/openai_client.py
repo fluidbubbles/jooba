@@ -2,7 +2,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from openai import APIError, AuthenticationError, RateLimitError, OpenAI
+from openai import APIError, AuthenticationError, OpenAI, RateLimitError
 
 from app.core.config import settings
 from app.services.exceptions import PermanentError, ProviderRateLimited, TransientError
