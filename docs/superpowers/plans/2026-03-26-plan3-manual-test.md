@@ -344,6 +344,24 @@ fetch('/api/sequences/00000000-0000-0000-0000-000000000099/analytics')
 
 ---
 
+## What You Must Test Manually in the Browser
+
+Everything else in this plan can be run via Playwright or curl scripts. These tests require a human at the keyboard:
+
+| Test | What to do | Why manual |
+|------|-----------|------------|
+| **2.3** Enroll candidates | Click "Enroll 5", watch button change to "Enrolling...", verify toast appears and auto-dismisses after ~5s | Timing-dependent transient UI state |
+| **9.2** Escape key closes modal | Open modal, press Escape | Keyboard shortcut |
+| **14.1** Drag and drop CSV | Drag a file from Finder/Explorer onto the drop zone | Drag-and-drop interaction |
+| **16.1** Non-CSV file | Try uploading a .txt or .xlsx file | OS file picker behavior varies |
+| **18.1** Focus auto-moves to X button | Open modal, check which element has focus | Accessibility/focus state |
+| **18.2** Tab trap in modal | Tab repeatedly, verify focus doesn't escape modal | Keyboard navigation |
+| **18.3** Focus restores on close | Close modal, verify focus returns to trigger button | Focus state tracking |
+
+**Time estimate:** ~5 minutes for all 7 checks.
+
+---
+
 ## Test Summary Checklist
 
 | # | Test | Expected | Pass? |

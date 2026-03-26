@@ -18,4 +18,5 @@ Architecture source: `docs/architecture/architecture.md` (Repository Layer).
 - Constructor: `__init__(self, db: AsyncSession) -> None`.
 - `get_by_id` returns `Model | None` via `scalar_one_or_none()`.
 - `get_or_create` returns `tuple[Model, bool]` (entity, is_new).
+- `get_or_create` / `create_if_not_exists` must be race-safe (`begin_nested` + unique-constraint recovery) and return `(entity, is_new)` instead of surfacing duplicate-key races.
 - Package `__init__.py` re-exports all repository classes via `__all__`.

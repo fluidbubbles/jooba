@@ -5,15 +5,15 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import EnrollmentStatus, SequenceStatus
-
-if TYPE_CHECKING:
-    from app.models.sequence import Sequence
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.enrollment_repo import EnrollmentRepository
 from app.repositories.sequence_repo import SequenceRepository
 from app.schemas.enrollment import CandidateInput
 from app.services.exceptions import InvalidSequenceData, SequenceNotFound
 from app.utils.unsubscribe import generate_unsubscribe_token
+
+if TYPE_CHECKING:
+    from app.models.sequence import Sequence
 
 
 class EnrollmentService:

@@ -35,11 +35,11 @@ def verify_unsubscribe_token(token: str) -> tuple[UUID, UUID] | None:
     Returns (candidate_id, sequence_id) if valid, None if malformed,
     signature-mismatched, or containing invalid UUID values.
     """
-    try:
-        candidate_str, sequence_str, provided_sig = token.split(":")
-    except ValueError:
-        logger.warning("Malformed unsubscribe token: expected 3 segments, got %d", len(token.split(":")))
+    parts = token.split(":")
+    if len(parts) != 3:
+        logger.warning("Malformed unsubscribe token: expected 3 segments, got %d", len(parts))
         return None
+    candidate_str, sequence_str, provided_sig = parts
 
     expected_sig = _sign(f"{candidate_str}:{sequence_str}")
 
