@@ -10,6 +10,7 @@ from app.integrations.email_sender import EmailSender, get_email_sender
 from app.models.email_event import EmailEvent
 from app.models.enums import EmailDirection, EnrollmentStatus, SequenceStatus
 from app.repositories.candidate_repo import CandidateRepository
+from app.repositories.email_event_repo import EmailEventRepository
 from app.repositories.enrollment_repo import EnrollmentRepository
 from app.repositories.nylas_account_repo import NylasAccountRepository
 from app.repositories.sequence_repo import SequenceRepository
@@ -29,6 +30,7 @@ class EnrollmentService:
         self._db = db
         self._candidate_repo = CandidateRepository(db)
         self._enrollment_repo = EnrollmentRepository(db)
+        self._event_repo = EmailEventRepository(db)
         self._nylas_repo = NylasAccountRepository(db)
         self._sequence_repo = SequenceRepository(db)
 
@@ -363,3 +365,41 @@ class EnrollmentService:
             trigger="unsubscribe_clicked",
         )
         return True
+
+    async def mark_replied_by_event(self, email_event_id: UUID) -> None:
+        """Look up event and mark its enrollment as REPLIED.
+
+        Used by update_enrollment_on_reply task — keeps repo access in service layer.
+        """
+        event = await self._event_repo.find_by_id(email_event_id)
+        if not event:
+            logger.warning("mark_replied_by_event: event %s not found", email_event_id)
+            return
+        await self.mark_replied(event.enrollment_id)
+
+    async def mark_replied(self, enrollment_id: UUID) -> None:
+        """Mark enrollment as REPLIED — candidate responded, cancel follow-ups."""
+        enrollment = await self._enrollment_repo.get_by_id(enrollment_id)
+        if not enrollment:
+            logger.warning("mark_replied: enrollment %s not found", enrollment_id)
+            return
+
+        # Idempotency: skip if already in terminal state
+        if enrollment.status in (
+            EnrollmentStatus.REPLIED.value,
+            EnrollmentStatus.OPTED_OUT.value,
+            EnrollmentStatus.BOUNCED.value,
+        ):
+            return
+
+        old_status = enrollment.status
+        enrollment.status = EnrollmentStatus.REPLIED.value
+        enrollment.next_send_at = None  # cancel pending follow-ups
+        await self._db.flush()
+
+        await self._enrollment_repo.log_transition(
+            enrollment_id=enrollment_id,
+            from_status=EnrollmentStatus(old_status),
+            to_status=EnrollmentStatus.REPLIED,
+            trigger="reply_received",
+        )
