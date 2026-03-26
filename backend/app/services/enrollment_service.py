@@ -1,16 +1,21 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import EnrollmentStatus, SequenceStatus
+from app.integrations.email_sender import get_email_sender
+from app.models.email_event import EmailEvent
+from app.models.enums import EmailDirection, EnrollmentStatus, SequenceStatus
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.enrollment_repo import EnrollmentRepository
+from app.repositories.nylas_account_repo import NylasAccountRepository
 from app.repositories.sequence_repo import SequenceRepository
 from app.schemas.enrollment import CandidateInput
-from app.services.exceptions import InvalidSequenceData, SequenceNotFound
-from app.utils.unsubscribe import generate_unsubscribe_token
+from app.services.email_service import EmailService
+from app.services.exceptions import InvalidSequenceData, PermanentError, SequenceNotFound
+from app.utils.unsubscribe import generate_unsubscribe_token, verify_unsubscribe_token
 
 if TYPE_CHECKING:
     from app.models.sequence import Sequence
@@ -21,6 +26,7 @@ class EnrollmentService:
         self._db = db
         self._candidate_repo = CandidateRepository(db)
         self._enrollment_repo = EnrollmentRepository(db)
+        self._nylas_repo = NylasAccountRepository(db)
         self._sequence_repo = SequenceRepository(db)
 
     async def _get_sequence_or_raise(self, sequence_id: UUID) -> "Sequence":
@@ -123,3 +129,151 @@ class EnrollmentService:
     async def get_analytics(self, sequence_id: UUID) -> dict[str, int]:
         await self._get_sequence_or_raise(sequence_id)
         return await self._enrollment_repo.get_analytics(sequence_id)
+
+    async def send_email_for_enrollment(self, enrollment_id: UUID) -> None:
+        """Entry point for the send task. Resolves sender + account, then delegates."""
+        account = await self._nylas_repo.get_first()
+        if not account:
+            raise PermanentError("No email account connected")
+
+        sender = get_email_sender()
+        await self._advance_step(enrollment_id, sender=sender, grant_id=account.grant_id)
+
+    async def _advance_step(self, enrollment_id: UUID, sender: Any, grant_id: str) -> None:
+        """Send the next email for an enrollment. All business logic here."""
+        enrollment = await self._enrollment_repo.get_by_id(enrollment_id)
+        if not enrollment:
+            return
+
+        if enrollment.status != EnrollmentStatus.ACTIVE.value:
+            return
+
+        sequence = await self._sequence_repo.get_by_id(enrollment.sequence_id)
+        if not sequence or not sequence.steps:
+            return
+
+        step_index = enrollment.current_step
+        if step_index >= len(sequence.steps):
+            return
+
+        step = sequence.steps[step_index]
+
+        candidate = await self._candidate_repo.get_by_id(enrollment.candidate_id)
+        if not candidate:
+            return
+
+        composed = EmailService.compose(step, candidate, enrollment.unsubscribe_token)
+
+        reply_to_id = None
+        if step_index > 0:
+            reply_to_id = await self._get_last_outbound_message_id(enrollment_id)
+
+        result = sender.send(
+            grant_id=grant_id,
+            to=composed["to"],
+            subject=composed["subject"],
+            body_html=composed["body_html"],
+            reply_to_message_id=reply_to_id,
+        )
+
+        event = EmailEvent(
+            enrollment_id=enrollment_id,
+            direction=EmailDirection.OUTBOUND.value,
+            step_index=step_index,
+            subject=composed["subject"],
+            body_html=composed["body_html"],
+            nylas_message_id=result.message_id,
+            nylas_thread_id=result.thread_id,
+        )
+        self._db.add(event)
+        await self._db.flush()
+
+        if step_index + 1 < len(sequence.steps):
+            next_step = sequence.steps[step_index + 1]
+            enrollment.current_step = step_index + 1
+            enrollment.next_send_at = datetime.now(timezone.utc) + timedelta(
+                minutes=next_step.delay_minutes
+            )
+            trigger = "email_sent"
+        else:
+            enrollment.status = EnrollmentStatus.COMPLETED.value
+            enrollment.next_send_at = None
+            enrollment.completed_at = datetime.now(timezone.utc)
+            trigger = "completed"
+
+        await self._db.flush()
+
+        await self._enrollment_repo.log_transition(
+            enrollment_id=enrollment_id,
+            from_status=EnrollmentStatus.ACTIVE,
+            to_status=EnrollmentStatus(enrollment.status),
+            trigger=trigger,
+        )
+
+    async def _get_last_outbound_message_id(self, enrollment_id: UUID) -> str | None:
+        """Get the last outbound email's Nylas message ID for threading."""
+        result = await self._db.execute(
+            select(EmailEvent.nylas_message_id)
+            .where(
+                EmailEvent.enrollment_id == enrollment_id,
+                EmailEvent.direction == EmailDirection.OUTBOUND.value,
+            )
+            .order_by(EmailEvent.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def mark_paused(self, enrollment_id: UUID) -> None:
+        """Pause an enrollment (transient failures after max retries)."""
+        enrollment = await self._enrollment_repo.get_by_id(enrollment_id)
+        if not enrollment or enrollment.status != EnrollmentStatus.ACTIVE.value:
+            return
+        enrollment.status = EnrollmentStatus.PAUSED.value
+        enrollment.next_send_at = None
+        await self._db.flush()
+        await self._enrollment_repo.log_transition(
+            enrollment_id=enrollment_id,
+            from_status=EnrollmentStatus.ACTIVE,
+            to_status=EnrollmentStatus.PAUSED,
+            trigger="max_retries_exhausted",
+        )
+
+    async def opt_out(self, token: str) -> bool:
+        """Mark enrollment as opted-out via unsubscribe token.
+
+        Returns True if the candidate is now opted out (including already-terminal
+        states such as BOUNCED — the email is already undeliverable, so the intent
+        is satisfied). Returns False if the token is invalid or the enrollment is
+        not found.
+        """
+        parsed = verify_unsubscribe_token(token)
+        if not parsed:
+            return False
+
+        candidate_id, sequence_id = parsed
+        enrollment = await self._enrollment_repo.get_by_candidate_and_sequence(
+            candidate_id, sequence_id
+        )
+        if not enrollment:
+            return False
+
+        # BOUNCED is treated as equivalent: email is undeliverable, so unsubscribing
+        # is already satisfied — acknowledge success without re-transitioning.
+        if enrollment.status in (
+            EnrollmentStatus.OPTED_OUT.value,
+            EnrollmentStatus.BOUNCED.value,
+        ):
+            return True
+
+        old_status = enrollment.status
+        enrollment.status = EnrollmentStatus.OPTED_OUT.value
+        enrollment.next_send_at = None
+        await self._db.flush()
+
+        await self._enrollment_repo.log_transition(
+            enrollment_id=enrollment.id,
+            from_status=EnrollmentStatus(old_status),
+            to_status=EnrollmentStatus.OPTED_OUT,
+            trigger="unsubscribe_clicked",
+        )
+        return True

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -235,6 +235,29 @@ class EnrollmentRepository:
             "completed": status_counts.get(EnrollmentStatus.COMPLETED.value, 0),
             "paused": status_counts.get(EnrollmentStatus.PAUSED.value, 0),
         }
+
+    async def claim_due_enrollments(self, limit: int = 100) -> list[UUID]:
+        """Atomically claim enrollments due for sending.
+
+        Uses FOR UPDATE SKIP LOCKED to prevent overlapping scheduler cycles.
+        Sets next_send_at = NULL so the next cycle skips them.
+        """
+        result = await self._db.execute(
+            text("""
+                UPDATE enrollments
+                SET next_send_at = NULL, updated_at = now()
+                WHERE id IN (
+                    SELECT id FROM enrollments
+                    WHERE status = :status AND next_send_at <= now()
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT :limit
+                )
+                RETURNING id
+            """),
+            {"status": EnrollmentStatus.ACTIVE.value, "limit": limit},
+        )
+        rows = result.fetchall()
+        return [row[0] for row in rows]
 
     async def log_transition(
         self,

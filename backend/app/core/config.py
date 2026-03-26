@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     nylas_client_id: str = Field(default="")
     nylas_api_key: str = Field(default="")
     nylas_callback_url: str = Field(default="http://localhost:8000/api/nylas/callback")
+    nylas_webhook_secret: str = Field(default="")
 
     # OpenAI
     openai_api_key: str = Field(default="")
@@ -23,6 +24,15 @@ class Settings(BaseSettings):
     # Provider selection
     email_provider: str = Field(default="nylas")  # nylas | mock
     llm_provider: str = Field(default="openai")  # openai | mock
+
+    # Unsubscribe
+    unsubscribe_base_url: str = Field(default="http://localhost:8000/api/unsubscribe")
+
+    # Frontend URL (for OAuth redirect)
+    frontend_url: str = Field(default="http://localhost:3000")
+
+    # Unreplied threshold
+    unreplied_threshold_minutes: int = Field(default=5)
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

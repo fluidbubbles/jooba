@@ -95,6 +95,13 @@ export interface PaginatedEnrollments {
   total: number
 }
 
+export interface NylasConnection {
+  connected: boolean
+  email: string | null
+  provider: string | null
+  connected_at: string | null
+}
+
 export interface SequenceAnalytics {
   enrolled: number
   sent: number

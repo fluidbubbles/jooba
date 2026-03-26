@@ -36,3 +36,19 @@ class InvalidStateTransition(DomainError):
 class InvalidSequenceData(DomainError):
     def __init__(self, reason: str) -> None:
         super().__init__(reason, "INVALID_SEQUENCE_DATA")
+
+
+class ProviderRateLimited(DomainError):
+    def __init__(self, retry_after: int = 60) -> None:
+        self.retry_after = retry_after
+        super().__init__(f"Rate limited, retry after {retry_after}s", "PROVIDER_RATE_LIMITED")
+
+
+class TransientError(DomainError):
+    def __init__(self, message: str = "Transient provider error") -> None:
+        super().__init__(message, "TRANSIENT_ERROR")
+
+
+class PermanentError(DomainError):
+    def __init__(self, message: str = "Permanent provider error") -> None:
+        super().__init__(message, "PERMANENT_ERROR")

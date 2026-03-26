@@ -1,5 +1,9 @@
 import { Inbox, LayoutDashboard, Mail, Settings } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, NavLink } from 'react-router-dom'
+
+import { api } from '../lib/api'
+import type { NylasConnection } from '../lib/types'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -9,6 +13,14 @@ const navItems = [
 ]
 
 export default function Sidebar() {
+  const [connection, setConnection] = useState<NylasConnection | null>(null)
+
+  useEffect(() => {
+    api.nylas.status().then(setConnection).catch((err: unknown) => {
+      console.error('Failed to load connection status', err)
+    })
+  }, [])
+
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col justify-between bg-[#1A1D2E] p-5">
       <div className="space-y-8">
@@ -33,10 +45,20 @@ export default function Sidebar() {
           ))}
         </nav>
       </div>
-      <div className="flex items-center gap-2">
-        <div className="h-2 w-2 rounded-full bg-green-500" />
-        <span className="text-xs text-gray-400">dan@ramp.com</span>
-      </div>
+      {connection?.connected ? (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="w-2 h-2 rounded-full bg-green-400" />
+          <span className="text-gray-400 truncate">{connection.email}</span>
+        </div>
+      ) : (
+        <Link
+          to="/settings"
+          className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300"
+        >
+          <span className="w-2 h-2 rounded-full bg-red-400" />
+          Connect Email
+        </Link>
+      )}
     </aside>
   )
 }

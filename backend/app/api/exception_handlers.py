@@ -6,14 +6,20 @@ from app.services.exceptions import (
     DomainError,
     EnrollmentNotActive,
     InvalidStateTransition,
+    ProviderRateLimited,
     SequenceNotFound,
 )
 
 
-def _domain_error_response(exc: DomainError, status_code: int) -> JSONResponse:
+def _domain_error_response(
+    exc: DomainError,
+    status_code: int,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"error": exc.message, "code": exc.code},
+        headers=headers,
     )
 
 
@@ -41,6 +47,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         _request: Request, exc: InvalidStateTransition
     ) -> JSONResponse:
         return _domain_error_response(exc, 409)
+
+    @app.exception_handler(ProviderRateLimited)
+    async def rate_limited(
+        _request: Request, exc: ProviderRateLimited
+    ) -> JSONResponse:
+        return _domain_error_response(exc, 503, headers={"Retry-After": str(exc.retry_after)})
 
     @app.exception_handler(DomainError)
     async def domain_error(_request: Request, exc: DomainError) -> JSONResponse:

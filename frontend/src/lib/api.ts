@@ -3,6 +3,7 @@ import type {
   CandidateInput,
   EnrollmentStatus,
   EnrollResponse,
+  NylasConnection,
   PaginatedEnrollments,
   Sequence,
   SequenceAnalytics,
@@ -87,6 +88,20 @@ export const api = {
 
     analytics(sequenceId: string): Promise<SequenceAnalytics> {
       return apiFetch<SequenceAnalytics>(`/sequences/${sequenceId}/analytics`)
+    },
+  },
+
+  nylas: {
+    status(): Promise<NylasConnection> {
+      return apiFetch<NylasConnection>('/nylas/status')
+    },
+
+    authUrl(): Promise<{ url: string }> {
+      return apiFetch<{ url: string }>('/nylas/auth-url')
+    },
+
+    disconnect(): Promise<{ status: string }> {
+      return apiFetch<{ status: string }>('/nylas/disconnect', { method: 'DELETE' })
     },
   },
 }
