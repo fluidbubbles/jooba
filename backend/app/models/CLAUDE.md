@@ -6,6 +6,7 @@ Architecture source: `docs/architecture/architecture.md` (Centralized Enums + Sc
 ## Model rules
 
 - Keep SQLAlchemy models as the source of DB shape and relationships.
+- For `Mapped["PeerModel"]` strings, use `from typing import TYPE_CHECKING` and import peer models under `if TYPE_CHECKING:` so Ruff resolves forward references (avoids F821).
 - Keep relationship names and `back_populates` explicit and symmetric.
 - Use centralized enums from `app.models.enums` for persisted status/sentiment values.
 - Keep valid transition maps centralized in enums (service layer enforces them).
