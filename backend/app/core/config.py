@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     nylas_api_key: str = Field(default="")
     nylas_callback_url: str = Field(default="http://localhost:8000/api/nylas/callback")
     nylas_webhook_secret: str = Field(default="")
+    nylas_webhook_url: str = Field(default="")
 
     # OpenAI
     openai_api_key: str = Field(default="")
@@ -34,6 +35,11 @@ class Settings(BaseSettings):
 
     # Unreplied threshold
     unreplied_threshold_minutes: int = Field(default=5)
+
+    # Referral auto-enrollment
+    referral_sequence_name: str = Field(default="Referral Outreach")
+    referral_clarification_sequence_name: str = Field(default="Referral Clarification")
+    referral_thank_you_sequence_name: str = Field(default="Referral Thank You")
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

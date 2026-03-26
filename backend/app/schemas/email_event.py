@@ -58,3 +58,4 @@ class SentimentCounts(BaseModel):
     not_interested: int = Field(default=0, ge=0)
     referral: int = Field(default=0, ge=0)
     neutral: int = Field(default=0, ge=0)
+    unreplied: int = Field(default=0, ge=0)

@@ -7,6 +7,7 @@ import pytest
 from app.integrations.openai_client import ClassificationResult
 from app.models.enums import Sentiment
 from app.services.classification_service import ClassificationService
+from app.services.exceptions import EmailEventNotFound
 
 
 def _build_service():
@@ -53,11 +54,12 @@ class TestClassify:
         service._event_repo.update_sentiment_if_unset.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_nonexistent_event_returns_early(self):
+    async def test_nonexistent_event_raises(self):
         service = _build_service()
         service._event_repo.find_by_id.return_value = None
 
-        await service.classify(uuid4())
+        with pytest.raises(EmailEventNotFound):
+            await service.classify(uuid4())
 
         service._event_repo.update_sentiment_if_unset.assert_not_awaited()
 

@@ -1,185 +1,194 @@
 # Jooba — Recruiter Outreach Automation
 
-An end-to-end web app that automates recruiter email outreach: connect an email account, build multi-step sequences, upload candidate CSVs, and let the system handle sending, follow-ups, reply classification, and referral extraction.
+An end-to-end web app that automates recruiter email outreach. Connect an email account, build multi-step sequences, upload candidate CSVs, and let the system handle sending, follow-ups, reply classification, and referral extraction.
 
-## Architecture Overview
+## Setup
 
-**Stack:** Python/FastAPI + TypeScript/React + PostgreSQL + Redis + Docker Compose
+### 1. Get API keys
 
-**Backend architecture:** Layered (API → Service → Repository → Integration) with event-driven side effects via Celery.
+| Service | What you need | Where to get it |
+|---------|--------------|-----------------|
+| Nylas | Client ID + API key | [dashboard.nylas.com](https://dashboard.nylas.com) — create an app, copy credentials |
+| OpenAI | API key | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+
+### 2. Configure environment
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Edit `backend/.env`:
+
+```env
+NYLAS_CLIENT_ID=your-nylas-client-id
+NYLAS_API_KEY=your-nylas-api-key
+OPENAI_API_KEY=sk-...
+
+# Optional: enable real-time webhooks (requires public URL)
+# NYLAS_WEBHOOK_URL=https://your-domain.com/api/nylas/webhook
+```
+
+Without `NYLAS_WEBHOOK_URL`, the app falls back to polling Nylas every 5 minutes. With it, webhooks deliver messages in real-time. Polling always runs regardless — it's a fault-tolerance layer that catches any messages webhooks may have missed due to network blips, downtime, or delivery failures. Both paths feed into the same `process_webhook()` pipeline with message-level deduplication, so duplicates are never processed twice. The webhook signing secret is auto-stored in the database when the webhook is registered during OAuth — no manual configuration needed.
+
+> **Faster polling for testing:** The polling interval is set in `backend/app/celery_app.py` under `beat_schedule["poll-nylas-messages"]["schedule"]`. Change `300.0` to `10.0` for 10-second polling, then restart: `docker compose restart celery-beat`
+
+### 3. Start everything
+
+```bash
+docker compose up --build -d
+docker compose exec backend alembic upgrade head
+```
+
+The first command starts all five services (API, frontend, worker, beat scheduler, Postgres, Redis). The second runs database migrations — required on first run and after pulling new code.
+
+| URL | What |
+|-----|------|
+| http://localhost:3000 | React UI |
+| http://localhost:8000/docs | API docs |
+
+> **Note:** Docker Compose defaults to `EMAIL_PROVIDER=mock` and `LLM_PROVIDER=mock` for local development without API keys. To use real Nylas sending and OpenAI classification, set `EMAIL_PROVIDER=nylas` and `LLM_PROVIDER=openai` in your `backend/.env`.
+
+### 4. Connect your email
+
+1. Open http://localhost:3000 → Settings
+2. Click "Connect Email Account"
+3. Complete the Gmail OAuth flow
+4. If `NYLAS_WEBHOOK_URL` is set, a webhook is auto-registered with Nylas
+
+### 5. Start sending
+
+1. Create a sequence with email steps
+2. Activate the sequence
+3. Upload a CSV of candidates (columns: `email`, `first_name`, `last_name`, `company`, `title`)
+4. The scheduler picks up due emails every 30 seconds and sends them
+5. Replies appear in the Inbox with AI-classified sentiment
+
+## What It Does
+
+1. **Connect email** — Link a Gmail account via Nylas OAuth. The app sends and receives through the recruiter's real inbox.
+2. **Build sequences** — Create multi-step email sequences with configurable day delays between steps.
+3. **Upload candidates** — CSV upload enrolls candidates into a sequence. The scheduler sends emails automatically.
+4. **Reply detection** — Nylas webhooks deliver new messages in real-time. A background poller runs every 5 minutes as a safety net to catch anything webhooks miss. Both paths feed into the same processing pipeline with message-level deduplication. An LLM classifies sentiment (interested / not interested / neutral).
+5. **Reply from app** — Recruiters reply directly from the inbox view. Replies thread correctly in Gmail.
+6. **Referral extraction** — When a candidate says "talk to X instead," the LLM extracts the referral and creates a new lead.
+7. **Dashboard** — Sequence analytics, candidate states, and a "needs follow-up" section for unreplied inbound messages.
+
+## Architecture
 
 ```
-React UI → FastAPI API → Service Layer → Repository (Postgres)
-                ↑                ↓
-          Nylas Webhooks    Celery Workers → Nylas API / OpenAI API
-                            Celery Beat (scheduler)
+                              ┌─────────────┐
+                              │  React UI   │
+                              └──────┬──────┘
+                                     │ HTTP
+                              ┌──────▼──────┐
+                              │ FastAPI API  │◄──── Nylas Webhooks (primary)
+                              └──────┬──────┘
+                                     │
+                              ┌──────▼──────┐
+                              │   Services  │──── Business rules, state machine,
+                              └──┬───┬───┬──┘     transaction boundaries
+                                 │   │   │
+                    ┌────────────┘   │   └────────────┐
+                    │                │                 │
+             ┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼──────┐
+             │ Repositories│  │Integrations │  │ Dispatcher  │
+             │   (SQL)     │  │(Nylas/OpenAI)│  │  (Celery)  │
+             └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+                    │                │                 │
+             ┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼──────┐
+             │  PostgreSQL │  │ External    │  │   Redis     │
+             │             │  │ APIs        │  │  (broker)   │
+             └─────────────┘  └─────────────┘  └──────┬──────┘
+                                                      │
+                                               ┌──────▼──────┐
+                                               │Celery Worker│
+                                               │  send email │
+                                               │  classify   │
+                                               │  referrals  │
+                                               └─────────────┘
+                                               ┌─────────────┐
+                                               │ Celery Beat │
+                                               │  scheduler  │──── every 30s
+                                               │  poller     │──── every 5min
+                                               └─────────────┘
 ```
 
 Five processes, one codebase:
 
 | Process | Role |
 |---------|------|
-| FastAPI server | HTTP API + Nylas webhook handler |
-| Celery worker | Async tasks (send emails, classify replies, extract referrals) |
-| Celery beat | Periodic scheduler (sends due emails every 30s) |
+| FastAPI | HTTP API + webhook endpoint |
+| Celery worker | Sends emails, classifies sentiment, extracts referrals, polls for missed messages |
+| Celery beat | Triggers due email sends (30s) and fallback Nylas polling (5min) |
 | PostgreSQL | Persistent storage |
 | Redis | Celery message broker |
 
-## Design Patterns
+**Layered architecture** — each layer has one job. API handles HTTP only. Services own business rules. Repositories own all SQL. Integrations wrap external SDKs. Tasks are thin wrappers that call services. No layer skips a level.
 
-### Repository Pattern
+## Why This Architecture
 
-All database queries are isolated in repository classes. Services never import SQLAlchemy. This means swapping the database or optimizing a slow query touches one file — no business logic changes.
+This is a take-home project, but I built it with production structure. The patterns here aren't over-engineering — they solve real problems that show up the moment you run async email sending at any scale.
 
-```
-EnrollmentRepository
-├── get_due_enrollments()     → scheduler uses this every 30s
-├── get_overdue_nudges()      → dashboard "Needs Follow-Up" section
-├── get_by_sequence()         → sequence detail candidate table
-└── create(), update_status() → all state changes
-```
+**Concurrency is handled at the database level.** The scheduler claims due enrollments using `FOR UPDATE SKIP LOCKED`. Multiple workers can run simultaneously and never double-send the same email. The DB itself arbitrates who gets the work.
 
-### State Machine Pattern
+**Failures are expected and tolerated.** Celery tasks use `acks_late=True` so unfinished work is redelivered on crash. A 3-tier retry policy handles transient failures (retry with backoff), rate limits (retry indefinitely), and permanent failures (pause the enrollment for recruiter review). The system degrades gracefully instead of losing emails.
 
-Enrollment status transitions are explicit and validated. The service layer rejects invalid transitions rather than silently corrupting state.
+**External APIs never leak into business logic.** Nylas and OpenAI SDK exceptions are caught at the integration boundary and translated into domain errors (`TransientError`, `PermanentError`, `ProviderRateLimited`). Services make decisions based on these domain errors, not raw HTTP status codes. Swapping Nylas for SendGrid or OpenAI for Anthropic is a config change — set `EMAIL_PROVIDER=mock` or `LLM_PROVIDER=mock` and the system runs without any API keys.
 
-```
-ACTIVE → REPLIED       (candidate replied)
-ACTIVE → COMPLETED     (all steps sent, no reply)
-ACTIVE → BOUNCED       (email delivery failed)
-ACTIVE → OPTED_OUT     (clicked unsubscribe)
-ACTIVE → PAUSED        (transient send failures)
-PAUSED → ACTIVE        (recruiter resumes after investigation)
-```
+**Concerns are separated so changes are local.** Adding a new sequence step type touches the service layer. Fixing a slow query touches one repository. Changing the email provider touches one integration file. Nothing ripples across layers.
 
-Terminal states (REPLIED, COMPLETED, BOUNCED, OPTED_OUT) cannot transition to anything else.
+**State transitions are explicit.** Enrollment status changes follow a state machine with validated transitions. The service rejects invalid transitions rather than silently corrupting data. Every state change is logged in the same DB transaction as the update.
 
-### Strategy Pattern (Swappable Integrations)
-
-External APIs are behind interfaces. The service layer calls a `Classifier` or `Sender` — it never imports `openai` or `nylas` directly.
-
-```python
-# config.py — swap providers with an env var
-email_provider: str = "nylas"      # nylas | mock
-llm_provider: str = "openai"       # openai | anthropic | mock
-```
-
-This gives us: mock providers for testing (no API calls in CI), and the ability to swap OpenAI for Anthropic or Nylas for SendGrid by changing one line.
-
-### Observer Pattern (via Celery Tasks)
-
-When something happens, the system fans out to independent tasks. Each task does one thing. Adding a new reaction means adding one task — zero changes to existing code.
-
-```
-"Inbound email received" triggers:
-├── classify_reply          (LLM classification)
-├── update_enrollment       (mark as replied, cancel follow-ups)
-└── log_state_transition    (audit log)
-
-"Reply classified as referral" triggers:
-├── extract_referral        (LLM extracts contact info)
-└── auto_enroll_referral    (enroll referred person)
-```
-
-Three separate Celery queues (`email`, `ai`, `default`) prevent slow LLM calls from blocking email sends.
-
-### Layered Architecture
-
-Each layer has exactly one job. No layer skips a level.
-
-| Layer | Responsibility | Knows About | Does NOT Know About |
-|-------|---------------|-------------|-------------------|
-| API | HTTP in/out, validation | Pydantic, Services | SQLAlchemy, Nylas, OpenAI |
-| Service | Business rules, orchestration | Repos, Integrations, Celery | FastAPI, HTTP |
-| Repository | Data access, all SQL | SQLAlchemy, DB session | Business rules, APIs |
-| Integration | External API wrappers | Nylas SDK, OpenAI SDK | Database, business rules |
-| Task | Async invocation + retry policy | Services only | Repositories, Integrations, FastAPI, HTTP |
-
-See `docs/architecture/architecture.md` for complete data flows, retry policies, and file structure.
-
-## Setup
-
-### Prerequisites
-
-- Docker & Docker Compose
-- Nylas API credentials
-- OpenAI API key
-
-### Environment Variables
-
-Create a `.env` file in the project root:
-
-```env
-# Nylas
-NYLAS_CLIENT_ID=your_client_id
-NYLAS_API_KEY=your_api_key
-NYLAS_CALLBACK_URL=http://localhost:8000/api/nylas/callback
-
-# OpenAI
-OPENAI_API_KEY=your_openai_key
-
-# Database (SQLAlchemy async — must use asyncpg driver)
-DATABASE_URL=postgresql+asyncpg://jooba:jooba@db:5432/jooba
-
-# Redis
-REDIS_URL=redis://redis:6379/0
-
-# App
-SECRET_KEY=your_secret_key
-```
-
-### How to Run
-
-```bash
-docker compose up
-```
-
-Frontend: http://localhost:3000
-Backend API: http://localhost:8000
-API docs: http://localhost:8000/docs
+**Unsubscribe links are stateless.** HMAC-signed tokens — no DB table, no expiry management. The signature proves the token is genuine without a lookup.
 
 ## Assumptions & Tradeoffs
 
-### Assumptions
+- **Single recruiter, no auth.** The spec says "assume a single recruiter user." All endpoints are public. Adding auth is middleware — the architecture supports it without restructuring.
+- **Synchronous CSV parsing.** Uploads are processed in one API call. Fine for 50–500 candidates. For 10K+, this would move to a background task with progress tracking.
+- **Opt-out is per-enrollment.** Unsubscribing stops one sequence, not all. A production system would add a `do_not_contact` flag on the candidate and check it before every send.
+- **Webhook race condition is handled.** Celery tasks are dispatched before the webhook DB transaction commits. If a task runs before the commit, the service raises `EmailEventNotFound`, which triggers the task's retry policy (exponential backoff for classification, immediate retry for enrollment state). The window is sub-millisecond in practice, but the retry ensures correctness under load.
+- **No deliverability controls.** No sending limits UI, no SPF/DKIM config, no domain warmup tracking. Important for production but out of scope here.
+- **Referral auto-enrollment trusts LLM output.** Extracted referrals surface in the UI for review. A production system would validate that extracted emails appear literally in the reply text before acting on them.
 
-1. **Single recruiter user.** No authentication or multi-user support. The app assumes one operator per instance. Multi-tenancy is architecturally supported (add `client_id` FK) but not implemented.
+## What I'd Do With More Time
 
-2. **Personal email outreach.** We assume recruiters reach out to candidates' personal email addresses (sourced from LinkedIn, GitHub, Apollo, etc.), not work emails. This is the standard practice in tech recruiting — contacting someone's work email about leaving their job is unprofessional and risks being seen by their employer.
+### Next 2–3 days (high impact, low effort)
 
-3. **Days as minutes.** Sequence step delays are in minutes for testing speed. In production, the unit is controlled via an environment variable — the frontend is unit-agnostic and just displays the number.
+- **Per-channel rate limiting** — Enforce sending limits per email account to protect sender reputation and avoid provider throttling.
+- **Candidate scoring & staged sends** — Candidates arrive pre-scored from Jooba's search. Send to the highest-scored batch first, monitor response rates, then expand to the next tier. This turns every sequence into a natural A/B test — if the top batch doesn't respond, adjust the messaging before reaching the rest.
+- **UI polish** — Better experience overall, richer email editor, drag-and-drop sequence builder, sequence forming animations.
 
-4. **Email provider agnostic.** The UI says "Email Account," not "Gmail." Nylas abstracts Gmail, Outlook, and other providers behind a single API. Swapping providers requires no frontend changes.
+### Next 1–2 weeks (high impact, moderate effort)
 
-5. **LLM provider swappable.** Classification and referral extraction use an interface pattern. OpenAI is the default, but switching to Anthropic or any other provider is a config change, not a code change.
+- **AI sequence generation** — Recruiter provides role context, the LLM generates a full email sequence. The system would ship with a library of proven prompts organized by role type (backend engineer, product manager, etc.) that it selects automatically. Recruiters can also bring their own templates if they prefer.
+- **Message effectiveness analysis** — Track which subject lines, tones, and formats get the most replies over time. Surface insights like "shorter first emails get 2x more responses for senior engineers." Basically A/B testing of sequences.
+- **Slack/Telegram integration** — Notify recruiters of new replies, interested candidates, or referrals in the channels they already live in.
+- **Agentic reply handling** — Pair the state machine with an LLM to handle common low-stakes scenarios autonomously: propose meeting times based on calendar availability, ask clarifying questions when a referral is missing contact info, or confirm details when a candidate's reply is ambiguous. The recruiter stays in the loop for high-stakes decisions (interested candidates, negotiations) but routine back-and-forth happens automatically.
 
-### Tradeoffs
+### Longer term (structural changes)
 
-1. **Synchronous CSV parsing.** CSV uploads are parsed and enrolled synchronously in a single API call. For very large CSVs (10,000+ candidates), this should be moved to a Celery task with progress tracking. For the expected scale (50-500 candidates per upload), synchronous is simpler and fast enough.
+- **Multi-client support** — The current app assumes one recruiter, one inbox. Jooba operates across dozens of client companies. Add a Client model scoping sequences and Nylas accounts, then surface the entire operation as a Kanban board - columns by stage (Enrolled → Contacted → Replied → Interested), cards tagged by client and sequence, so the operator sees pipeline health across all clients at a glance without context-switching.
+- **Team features** — Multiple recruiters, shared sequences, per-user analytics.
 
-2. **No A/B testing.** Sequence steps are fixed per sequence. A/B testing subject lines would require a step variant model and random assignment logic. Deferred to keep the data model simple.
+## Project Structure
 
-3. **No deliverability controls.** No sending limits UI, no custom tracking domain, no SPF/DKIM configuration. The backend has a basic token bucket (40 sends/minute) but this isn't exposed to the user. A production tool would need sender reputation management.
+```
+backend/
+  app/
+    api/          # Route handlers (HTTP boundary only)
+    services/     # Business logic and orchestration
+    repositories/ # All database queries
+    integrations/ # Nylas, OpenAI SDK wrappers
+    tasks/        # Celery task definitions
+    models/       # SQLAlchemy models
+    schemas/      # Pydantic request/response shapes
+    core/         # Config, DB session, dependency injection
+  alembic/        # Database migrations
+  tests/          # Integration + unit tests
 
-4. **No ATS integration.** Candidates live in Jooba only. There's no push to Greenhouse, Lever, or Ashby. This is the most requested feature for v2.
-
-5. **Opt-out is per-enrollment, not per-candidate.** Unsubscribing marks one enrollment as `OPTED_OUT`, but if the same candidate is in another sequence, they keep receiving those emails. For a single-recruiter running 2-3 sequences, this is unlikely to occur. A production system would add a `do_not_contact` flag on the Candidate record — checked by the scheduler before sending and by the enrollment flow before enrolling. One column, two checks. Not building it now because the single-user scope makes multi-sequence overlap rare.
-
-6. **No cross-sequence deduplication.** A candidate can be enrolled in multiple sequences simultaneously (e.g., "Sr Backend Engineer" and "ML Platform Engineer"). The system does not prevent this or warn the recruiter. In practice this is rare — a recruiter targeting the same person for two different roles would know — but at scale with multiple sequences running, a candidate could receive overlapping outreach. A production system would check active enrollments at enrollment time and surface a warning: "Jane Chen is already in 'Sr Backend Engineer' (Step 2 of 3)."
-
-7. **No authentication (per spec).** The task spec says "assume a single recruiter user, no authentication required." All API endpoints are publicly accessible. This is acceptable for a locally-running Dockerized demo but means the app should never be exposed to an untrusted network without adding auth middleware. A production deployment would add bearer token or session-based authentication.
-
-8. **Referral auto-enrollment trusts LLM output.** When the LLM classifies a reply as a referral, it extracts the referred person's name and email and can auto-enroll them in a sequence. A malicious candidate could craft a reply that manipulates the LLM into extracting a fabricated referral (prompt injection), causing unsolicited emails to an innocent person from the recruiter's real email account. The current mitigation: referrals surface in the UI for recruiter review before enrollment. A production system would add structured output constraints on LLM responses, validate that extracted emails appear literally in the reply text, and require explicit recruiter confirmation before any auto-enrollment.
-
-9. **Inbound email HTML is stored as-is.** Candidate reply HTML is stored in the database and rendered in the recruiter's inbox view. A malicious candidate could include JavaScript in their email body (stored XSS). The frontend must sanitize all inbound HTML before rendering — using DOMPurify or rendering inside a sandboxed iframe. This is a frontend implementation concern, not an architectural one, but worth calling out.
-
-## What I'd Do With 2-3 More Days
-
-1. **ATS integration** — Push interested candidates to Greenhouse/Lever via their APIs. Add a "Move to Pipeline" action in the Inbox that creates an ATS candidate with the full email thread attached.
-
-2. **AI sequence generation** — The architecture already supports this (see `docs/architecture/architecture.md` section 5.2). The recruiter provides role context, the LLM generates email steps. Built-in templates for common patterns (cold outreach, warm referral, re-engagement). The step editor stays the same — generation is just an input method.
-
-3. **Deliverability dashboard** — Sending limits per day, bounce rate tracking, domain warmup progress. Critical for any outreach tool that wants to keep recruiter accounts out of spam.
-
-4. **Outlook/Microsoft 365 testing** — Nylas supports it, but the OAuth flow and webhook behavior differ slightly from Gmail. Needs testing and potentially different callback handling.
-
-5. **Team features** — Multiple recruiters sharing sequences, per-recruiter analytics, role-based access. The layered architecture supports this cleanly — add a `user_id` FK and scope queries.
+frontend/
+  src/
+    pages/        # Route-level page components
+    components/   # Shared UI components
+    lib/          # API client, types, utilities
+```

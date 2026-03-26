@@ -80,8 +80,7 @@ class OpenAIClient:
 
         raw_content = response.choices[0].message.content
         if raw_content is None:
-            logger.warning("OpenAI returned empty content for classification")
-            return ClassificationResult(sentiment="neutral", reasoning="Empty response from classifier")
+            raise TransientError("OpenAI returned empty content for classification")
         content = raw_content.strip()
         try:
             parsed = json.loads(content)
@@ -89,9 +88,8 @@ class OpenAIClient:
                 sentiment=parsed["sentiment"].lower(),
                 reasoning=parsed.get("reasoning", ""),
             )
-        except (json.JSONDecodeError, KeyError, AttributeError, TypeError):
-            logger.warning("Failed to parse classification response: %s", content)
-            return ClassificationResult(sentiment="neutral", reasoning="Classification parse error")
+        except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as exc:
+            raise TransientError(f"Failed to parse classification response: {content}") from exc
 
     def extract_referral(self, reply_text: str) -> ReferralExtraction:
         """Extract referred contact info from a referral reply."""
@@ -102,8 +100,7 @@ class OpenAIClient:
 
         raw_content = response.choices[0].message.content
         if raw_content is None:
-            logger.warning("OpenAI returned empty content for referral extraction")
-            return ReferralExtraction(name=None, email=None, title=None, company=None)
+            raise TransientError("OpenAI returned empty content for referral extraction")
         content = raw_content.strip()
         try:
             parsed = json.loads(content)
@@ -125,6 +122,5 @@ class OpenAIClient:
                 title=_opt_str("title"),
                 company=_opt_str("company"),
             )
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("Failed to parse referral extraction response: %s", content)
-            return ReferralExtraction(name=None, email=None, title=None, company=None)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise TransientError(f"Failed to parse referral extraction response: {content}") from exc

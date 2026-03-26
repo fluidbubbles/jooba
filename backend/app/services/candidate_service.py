@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from uuid import UUID
 
@@ -11,11 +12,15 @@ from app.services.exceptions import CandidateNotFound, EnrollmentNotFound
 from app.utils.formatting import format_candidate_name
 
 _BODY_SNIPPET_LEN = 150
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _body_snippet(body_text: str | None, body_html: str | None) -> str:
-    raw = body_text or body_html or ""
-    return raw[:_BODY_SNIPPET_LEN]
+    if body_text:
+        return body_text[:_BODY_SNIPPET_LEN]
+    if body_html:
+        return _HTML_TAG_RE.sub("", body_html)[:_BODY_SNIPPET_LEN]
+    return ""
 
 
 class CandidateService:

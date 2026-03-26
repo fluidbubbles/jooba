@@ -739,7 +739,11 @@ Scheduler batches with 60s pause between chunks of 40
 
 ### 5.5 Message Detection, Filtering + Classification
 
-Nylas fires a webhook for **every new message** in the connected account — inbound and outbound, regardless of source. This includes candidate replies, the recruiter's own replies from their email client, newsletters, personal emails, and spam. Our webhook handler filters the noise.
+**Message ingestion uses webhooks as the primary mechanism.** The webhook endpoint (`POST /api/nylas/webhook`) receives Nylas `message.created` events in real-time and feeds them into `EmailService.process_webhook()`. Register a webhook at Nylas (trigger: `message.created`, URL: `https://your-domain/api/nylas/webhook`) and set `NYLAS_WEBHOOK_SECRET` in the environment. The `NylasClient` integration includes `list_webhooks()`, `create_webhook()`, and `delete_webhook()` methods for programmatic management.
+
+**Polling runs as a safety net.** A Celery beat task (`poll_nylas_messages`) runs every 5 minutes and calls `EmailService.poll_new_messages()`, which fetches recent messages via the Nylas API and processes each through `process_webhook()`. This catches any messages that webhooks may have missed (network blips, downtime). Message-level deduplication (via `nylas_message_id`) prevents double-processing when both paths deliver the same message.
+
+Nylas fires events for **every new message** in the connected account — inbound and outbound, regardless of source. This includes candidate replies, the recruiter's own replies from their email client, newsletters, personal emails, and spam. The handler filters the noise.
 
 The `process_webhook()` method is decomposed into private methods that each handle one concern:
 

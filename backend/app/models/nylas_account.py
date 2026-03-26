@@ -14,6 +14,7 @@ class NylasAccount(Base):
     grant_id: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, nullable=False)
     provider: Mapped[str] = mapped_column(String, default="unknown")
+    webhook_secret: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     connected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

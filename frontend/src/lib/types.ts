@@ -43,6 +43,11 @@ export interface SequenceListItem {
   created_at: string
 }
 
+export interface PaginatedSequences {
+  items: SequenceListItem[]
+  total: number
+}
+
 export interface StepInput {
   subject: string
   body_html: string
@@ -180,6 +185,7 @@ export interface SentimentCounts {
   not_interested: number
   referral: number
   neutral: number
+  unreplied: number
 }
 
 /** Matches `app.schemas.analytics.SequenceSummary` (dashboard row per sequence). */
@@ -215,6 +221,7 @@ export interface ReferralInfo {
   referrer_name: string
   referrer_email: string
   has_email: boolean
+  enrolled: boolean
 }
 
 /** Transition row in enrollment timeline (`TimelineTransitionEntry`). */

@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
 
 class ReferralInfo(BaseModel):
@@ -10,7 +10,12 @@ class ReferralInfo(BaseModel):
     company: str | None
     referrer_name: str
     referrer_email: str
-    has_email: bool
+    enrolled: bool = False
+
+    @computed_field
+    @property
+    def has_email(self) -> bool:
+        return self.email is not None
 
 
 class ReferralEnrollRequest(BaseModel):

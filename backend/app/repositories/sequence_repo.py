@@ -2,14 +2,17 @@ import uuid
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from sqlalchemy import ColumnElement, delete, func, select
+from sqlalchemy import ColumnElement, delete, func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import class_mapper, selectinload
 from sqlalchemy.sql.selectable import Subquery
 
+from app.models.email_event import EmailEvent
 from app.models.enrollment import Enrollment
 from app.models.enums import EnrollmentStatus
+from app.models.referral import Referral
 from app.models.sequence import Sequence, SequenceStep
+from app.models.state_transition import StateTransition
 
 
 def _count_by_sequence_subquery(
@@ -47,12 +50,27 @@ class SequenceRepository:
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_name(self, name: str) -> Sequence | None:
+        stmt = (
+            select(Sequence)
+            .where(Sequence.name == name)
+            .options(selectinload(Sequence.steps))
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_id_for_update(self, sequence_id: uuid.UUID) -> Sequence | None:
         stmt = self._get_by_id_stmt(sequence_id, for_update=True)
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[dict[str, Any]]:
+    def _list_base_stmt(
+        self,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+    ):
         step_sq = _count_by_sequence_subquery(SequenceStep, label="step_count")
         enrolled_sq = _count_by_sequence_subquery(Enrollment, label="enrolled_count")
         replied_sq = _count_by_sequence_subquery(
@@ -73,11 +91,38 @@ class SequenceRepository:
             .outerjoin(step_sq, Sequence.id == step_sq.c.sequence_id)
             .outerjoin(enrolled_sq, Sequence.id == enrolled_sq.c.sequence_id)
             .outerjoin(replied_sq, Sequence.id == replied_sq.c.sequence_id)
-            .order_by(Sequence.created_at.desc())
         )
-        result = await self._db.execute(stmt)
-        rows = result.all()
-        return [
+        if q:
+            stmt = stmt.where(Sequence.name.ilike(f"%{q}%"))
+        if status:
+            stmt = stmt.where(Sequence.status == status)
+        return stmt
+
+    async def list_paginated(
+        self,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        sort: str = "created",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        base = self._list_base_stmt(q=q, status=status)
+        count_result = await self._db.execute(
+            select(func.count()).select_from(base.subquery())
+        )
+        total = count_result.scalar_one()
+
+        if sort == "enrolled":
+            order = literal_column("enrolled_count").desc()
+        else:
+            order = Sequence.created_at.desc()
+
+        rows_result = await self._db.execute(
+            base.order_by(order).limit(limit).offset(offset)
+        )
+        rows = rows_result.all()
+        items = [
             {
                 "id": row.id,
                 "name": row.name,
@@ -89,6 +134,7 @@ class SequenceRepository:
             }
             for row in rows
         ]
+        return items, total
 
     async def create(self, **kwargs: Any) -> Sequence:
         seq = Sequence(**kwargs)
@@ -125,6 +171,33 @@ class SequenceRepository:
         )
         await self._db.flush()
         return await self.create_steps(sequence_id, steps_data)
+
+    async def delete(self, sequence_id: uuid.UUID) -> None:
+        enrollment_ids = select(Enrollment.id).where(
+            Enrollment.sequence_id == sequence_id
+        )
+        event_ids = select(EmailEvent.id).where(
+            EmailEvent.enrollment_id.in_(enrollment_ids)
+        )
+        await self._db.execute(
+            delete(Referral).where(Referral.source_email_event_id.in_(event_ids))
+        )
+        await self._db.execute(
+            delete(StateTransition).where(StateTransition.enrollment_id.in_(enrollment_ids))
+        )
+        await self._db.execute(
+            delete(EmailEvent).where(EmailEvent.enrollment_id.in_(enrollment_ids))
+        )
+        await self._db.execute(
+            delete(Enrollment).where(Enrollment.sequence_id == sequence_id)
+        )
+        await self._db.execute(
+            delete(SequenceStep).where(SequenceStep.sequence_id == sequence_id)
+        )
+        await self._db.execute(
+            delete(Sequence).where(Sequence.id == sequence_id)
+        )
+        await self._db.flush()
 
     async def update(self, sequence: Sequence, **kwargs: Any) -> Sequence:
         column_keys = {attr.key for attr in class_mapper(Sequence).column_attrs}

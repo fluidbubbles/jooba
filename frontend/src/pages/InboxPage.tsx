@@ -10,10 +10,11 @@ import ReferralCard from '../components/ReferralCard'
 import EmptyState from '../components/EmptyState'
 import { Inbox } from 'lucide-react'
 
-type InboxTab = Sentiment | 'all'
+type InboxTab = Sentiment | 'all' | 'unreplied'
 
 const TABS = [
   { key: 'all', label: 'All' },
+  { key: 'unreplied', label: 'Unreplied' },
   { key: 'interested', label: 'Interested' },
   { key: 'not_interested', label: 'Not Interested' },
   { key: 'referral', label: 'Referral' },

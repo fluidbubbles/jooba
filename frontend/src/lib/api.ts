@@ -16,7 +16,7 @@ import type {
   Sequence,
   SequenceAnalytics,
   SequenceCreateInput,
-  SequenceListItem,
+  PaginatedSequences,
   SequenceStatus,
   SequenceUpdateInput,
   Sentiment,
@@ -58,13 +58,21 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     throw new ApiRequestError(res.status, body.error || res.statusText, body.code)
   }
 
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
 
 export const api = {
   sequences: {
-    list(): Promise<SequenceListItem[]> {
-      return apiFetch<SequenceListItem[]>('/sequences')
+    list(params?: { q?: string; status?: SequenceStatus; sort?: string; limit?: number; offset?: number }): Promise<PaginatedSequences> {
+      const qs = new URLSearchParams()
+      if (params?.q) qs.set('q', params.q)
+      if (params?.status) qs.set('status', params.status)
+      if (params?.sort) qs.set('sort', params.sort)
+      if (params?.limit != null) qs.set('limit', String(params.limit))
+      if (params?.offset != null) qs.set('offset', String(params.offset))
+      const suffix = qs.toString() ? `?${qs}` : ''
+      return apiFetch<PaginatedSequences>(`/sequences${suffix}`)
     },
 
     get(sequenceId: string): Promise<Sequence> {
@@ -77,6 +85,10 @@ export const api = {
 
     update(sequenceId: string, body: SequenceUpdateInput): Promise<Sequence> {
       return apiFetch<Sequence>(`/sequences/${sequenceId}`, { method: 'PUT', body: JSON.stringify(body) })
+    },
+
+    delete(sequenceId: string): Promise<void> {
+      return apiFetch<void>(`/sequences/${sequenceId}`, { method: 'DELETE' })
     },
 
     changeStatus(sequenceId: string, status: SequenceStatus): Promise<Sequence> {
@@ -117,6 +129,12 @@ export const api = {
       return apiFetch<ReferralInfo | null>(`/inbox/replies/${eventId}/referral`)
     },
 
+    retry(eventId: string): Promise<ReferralInfo | null> {
+      return apiFetch<ReferralInfo | null>(`/inbox/replies/${eventId}/referral/retry`, {
+        method: 'POST',
+      })
+    },
+
     enroll(eventId: string, sequenceId: string): Promise<EnrollResponse> {
       return apiFetch<EnrollResponse>(`/inbox/replies/${eventId}/referral/enroll`, {
         method: 'POST',
@@ -146,7 +164,7 @@ export const api = {
   },
 
   inbox: {
-    replies(sentiment?: Sentiment | 'all', limit = 50, offset = 0): Promise<InboxReply[]> {
+    replies(sentiment?: Sentiment | 'all' | 'unreplied', limit = 50, offset = 0): Promise<InboxReply[]> {
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
       if (sentiment && sentiment !== 'all') params.set('sentiment', sentiment)
       return apiFetch<InboxReply[]>(`/inbox/replies?${params}`)

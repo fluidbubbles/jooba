@@ -85,8 +85,22 @@ class SequenceService:
             raise SequenceNotFound(sequence_id)
         return seq
 
-    async def list_all(self) -> list[dict[str, Any]]:
-        return await self._repo.list_all()
+    async def list_all(
+        self,
+        *,
+        q: str | None = None,
+        status: SequenceStatus | None = None,
+        sort: str = "created",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        return await self._repo.list_paginated(
+            q=q,
+            status=status.value if status else None,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
 
     async def update(self, sequence_id: uuid.UUID, data: SequenceUpdate) -> Sequence:
         seq = await self.get(sequence_id)
@@ -103,6 +117,10 @@ class SequenceService:
             await self._repo.replace_steps(sequence_id, self._step_payloads(data.steps))
 
         return await self._reload_sequence(sequence_id)
+
+    async def delete(self, sequence_id: uuid.UUID) -> None:
+        await self.get(sequence_id)  # raises SequenceNotFound if missing
+        await self._repo.delete(sequence_id)
 
     async def change_status(
         self, sequence_id: uuid.UUID, new_status: SequenceStatus

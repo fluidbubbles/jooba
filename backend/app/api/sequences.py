@@ -1,13 +1,15 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.enums import SequenceStatus
 from app.models.sequence import Sequence
 from app.repositories.sequence_repo import SequenceRepository
 from app.schemas.sequence import (
+    PaginatedSequences,
     SequenceCreate,
     SequenceListItem,
     SequenceResponse,
@@ -39,12 +41,20 @@ async def create_sequence(
     return _to_response(seq)
 
 
-@router.get("", response_model=list[SequenceListItem])
+@router.get("", response_model=PaginatedSequences)
 async def list_sequences(
     service: SequenceServiceDep,
-) -> list[SequenceListItem]:
-    rows = await service.list_all()
-    return [SequenceListItem.model_validate(row) for row in rows]
+    q: str | None = None,
+    status: SequenceStatus | None = None,
+    sort: str = Query(default="created", pattern="^(created|enrolled)$"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> PaginatedSequences:
+    rows, total = await service.list_all(q=q, status=status, sort=sort, limit=limit, offset=offset)
+    return PaginatedSequences(
+        items=[SequenceListItem.model_validate(row) for row in rows],
+        total=total,
+    )
 
 
 @router.get("/{sequence_id}", response_model=SequenceResponse)
@@ -64,6 +74,14 @@ async def update_sequence(
 ) -> SequenceResponse:
     seq = await service.update(sequence_id, payload)
     return _to_response(seq)
+
+
+@router.delete("/{sequence_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sequence(
+    sequence_id: UUID,
+    service: SequenceServiceDep,
+) -> None:
+    await service.delete(sequence_id)
 
 
 @router.put("/{sequence_id}/status", response_model=SequenceResponse)

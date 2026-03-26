@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.integrations.classifier import get_classifier
 from app.models.enums import Sentiment
 from app.repositories.email_event_repo import EmailEventRepository
+from app.services.exceptions import EmailEventNotFound
 from app.tasks.dispatcher import get_dispatcher
 
 logger = logging.getLogger(__name__)
@@ -19,8 +20,7 @@ class ClassificationService:
         """Classify an inbound email event's sentiment via LLM."""
         event = await self._event_repo.find_by_id(email_event_id)
         if not event:
-            logger.warning("classify called for nonexistent event %s", email_event_id)
-            return
+            raise EmailEventNotFound(email_event_id)
 
         if event.sentiment is not None:
             logger.debug("event %s already classified, skipping", email_event_id)

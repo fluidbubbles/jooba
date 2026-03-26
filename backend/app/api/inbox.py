@@ -30,14 +30,17 @@ async def list_inbox_replies(
     db: AsyncSession = Depends(get_db),
 ):
     event_repo = EmailEventRepository(db)
-    replies = await event_repo.get_inbox_replies(sentiment, limit, offset)
 
     unreplied_ids = set(await event_repo.get_unreplied_inbound(
         sentiments=["interested", "referral", "neutral"],
         older_than_minutes=settings.unreplied_threshold_minutes,
     ))
 
-    return [
+    is_unreplied_filter = sentiment == "unreplied"
+    db_sentiment = None if is_unreplied_filter else sentiment
+    replies = await event_repo.get_inbox_replies(db_sentiment, limit, offset)
+
+    items = [
         InboxReplyItem(
             **r,
             candidate_name=format_candidate_name(
@@ -48,11 +51,22 @@ async def list_inbox_replies(
         for r in replies
     ]
 
+    if is_unreplied_filter:
+        items = [i for i in items if i.is_unreplied]
+
+    return items
+
 
 @router.get("/counts", response_model=SentimentCounts)
 async def get_sentiment_counts(db: AsyncSession = Depends(get_db)):
     event_repo = EmailEventRepository(db)
-    return await event_repo.get_sentiment_counts()
+    counts = await event_repo.get_sentiment_counts()
+    unreplied_ids = await event_repo.get_unreplied_inbound(
+        sentiments=["interested", "referral", "neutral"],
+        older_than_minutes=settings.unreplied_threshold_minutes,
+    )
+    counts["unreplied"] = len(unreplied_ids)
+    return counts
 
 
 @router.get(
@@ -61,6 +75,22 @@ async def get_sentiment_counts(db: AsyncSession = Depends(get_db)):
 )
 async def get_reply_referral(email_event_id: UUID, db: AsyncSession = Depends(get_db)):
     referral_service = ReferralService(db)
+    data = await referral_service.get_referral_for_event(email_event_id)
+    if data is None:
+        return None
+    return ReferralInfo.model_validate(data)
+
+
+@router.post(
+    "/replies/{email_event_id}/referral/retry",
+    response_model=ReferralInfo | None,
+)
+async def retry_referral_extraction(
+    email_event_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    referral_service = ReferralService(db)
+    await referral_service.process_referral(email_event_id)
+    await db.commit()
     data = await referral_service.get_referral_for_event(email_event_id)
     if data is None:
         return None
@@ -79,11 +109,7 @@ async def enroll_referred_candidate(
 ) -> EnrollResponse:
     referral_service = ReferralService(db)
     referral = await referral_service.get_referral_for_event(email_event_id)
-    if (
-        referral is None
-        or not referral.get("has_email")
-        or not referral.get("email")
-    ):
+    if referral is None or not referral.get("email"):
         raise DomainError(
             "Cannot enroll referral without email",
             "REFERRAL_NO_EMAIL",

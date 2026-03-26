@@ -1,8 +1,6 @@
-import { Mail } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import EmptyState from '../components/EmptyState'
-import SequenceFunnelCard from '../components/SequenceFunnelCard'
+import SequencesTable from '../components/SequencesTable'
 import StatCard from '../components/StatCard'
 import { api, ApiRequestError } from '../lib/api'
 import type { DashboardStats } from '../lib/types'
@@ -20,30 +18,20 @@ export default function DashboardPage() {
     setError(null)
     try {
       const data = await api.analytics.dashboard()
-      if (loadTokenRef.current !== token) {
-        return
-      }
+      if (loadTokenRef.current !== token) return
       setStats(data)
     } catch (err) {
       console.error('Failed to load dashboard', err)
-      if (loadTokenRef.current !== token) {
-        return
-      }
+      if (loadTokenRef.current !== token) return
       setError(err instanceof ApiRequestError ? err.message : 'Failed to load dashboard')
     } finally {
-      if (loadTokenRef.current === token) {
-        setLoading(false)
-      }
+      if (loadTokenRef.current === token) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
-
-  const handleRetry = () => {
-    void loadDashboard()
-  }
 
   const hasUnreplied = (stats?.unreplied_count ?? 0) > 0
 
@@ -59,7 +47,7 @@ export default function DashboardPage() {
           <span className="text-[13px] text-red-800">{error}</span>
           <button
             type="button"
-            onClick={handleRetry}
+            onClick={() => void loadDashboard()}
             className="shrink-0 rounded-md bg-white px-3 py-1.5 text-[13px] font-medium text-red-800 ring-1 ring-red-200 transition-colors hover:bg-red-50"
           >
             Retry
@@ -104,24 +92,19 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {stats.sequences.length === 0 ? (
-            <EmptyState
-              icon={Mail}
-              title="No sequences yet"
-              description="Create your first email sequence to start reaching out to candidates."
-              actionLabel="+ Create Sequence"
-              onAction={() => navigate('/sequences/new')}
-            />
-          ) : (
-            <section aria-label="Sequence funnels" className="space-y-4">
-              <h2 className="text-lg font-semibold text-gray-900">Sequences</h2>
-              <div className="grid gap-4 md:grid-cols-2">
-                {stats.sequences.map((s) => (
-                  <SequenceFunnelCard key={s.id} summary={s} />
-                ))}
-              </div>
-            </section>
-          )}
+          <section aria-label="Sequences" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Active Sequences</h2>
+              <button
+                type="button"
+                onClick={() => navigate('/sequences/new')}
+                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+              >
+                + New Sequence
+              </button>
+            </div>
+            <SequencesTable statusFilter="active" sort="enrolled" />
+          </section>
         </>
       )}
     </div>

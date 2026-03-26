@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from uuid import UUID
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.integrations.email_sender import get_email_sender
+from app.integrations.nylas_client import NylasClient
 from app.models.candidate import Candidate
 from app.models.enums import EmailDirection, EnrollmentStatus
 from app.models.enrollment import Enrollment
@@ -213,3 +215,44 @@ class EmailService:
         )
 
         return {"message_id": result.message_id, "event_id": str(event.id)}
+
+    async def poll_new_messages(self, received_after: int, nylas_client: NylasClient | None = None) -> int:
+        """Poll Nylas for new messages and process each through process_webhook.
+
+        Returns the max message timestamp for watermark advancement.
+        Only advances past messages that were successfully processed.
+        """
+        account = await self._nylas_repo.get_first()
+        if not account:
+            return received_after
+
+        client = nylas_client or NylasClient()
+        account_email = account.email.lower()
+
+        messages = await asyncio.to_thread(
+            client.list_messages, account.grant_id, received_after,
+        )
+        if not messages:
+            return received_after
+
+        logger.info("Poller found %d message(s) since ts=%d", len(messages), received_after)
+
+        max_processed_ts = received_after
+        for msg in messages:
+            if msg["sender_email"].lower() == account_email:
+                continue
+
+            logger.info(
+                "Poller processing: id=%s from=%s subj=%s",
+                msg["message_id"], msg["sender_email"], (msg["subject"] or "")[:40],
+            )
+            try:
+                await self.process_webhook(msg)
+                await self._db.commit()
+                if msg["date"] > max_processed_ts:
+                    max_processed_ts = msg["date"]
+            except Exception:
+                logger.exception("Poller: failed processing message %s", msg["message_id"])
+                await self._db.rollback()
+
+        return max_processed_ts

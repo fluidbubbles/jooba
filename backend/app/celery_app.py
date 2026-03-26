@@ -25,7 +25,7 @@ celery_app.conf.update(
         },
         "poll-nylas-messages": {
             "task": "app.tasks.nylas_poller.poll_nylas_messages",
-            "schedule": 10.0,
+            "schedule": 300.0,
         },
     },
     include=[

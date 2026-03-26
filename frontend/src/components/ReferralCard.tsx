@@ -1,7 +1,7 @@
-import { UserPlus, X } from 'lucide-react'
+import { CheckCircle, UserPlus, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, getApiErrorMessage } from '../lib/api'
-import type { ReferralInfo, SequenceListItem } from '../lib/types'
+import type { ReferralInfo } from '../lib/types'
 import type { ReactNode } from 'react'
 
 type ReferralCardProps = {
@@ -37,96 +37,64 @@ function ReferralCardShell({ onDismiss, children }: ReferralCardShellProps) {
 
 export default function ReferralCard({ emailEventId }: ReferralCardProps) {
   const [referral, setReferral] = useState<ReferralInfo | null>(null)
-  const [sequences, setSequences] = useState<SequenceListItem[]>([])
   const [dismissed, setDismissed] = useState(false)
-  const [enrolled, setEnrolled] = useState(false)
-  const [enrolling, setEnrolling] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedSequenceId, setSelectedSequenceId] = useState('')
   const loadTokenRef = useRef(0)
-  const enrollTokenRef = useRef(0)
-  const emailEventIdRef = useRef(emailEventId)
 
   const loadReferral = useCallback(async () => {
     const token = ++loadTokenRef.current
     setLoading(true)
     setError(null)
     try {
-      const [ref, sequenceRows] = await Promise.all([
-        api.referrals.info(emailEventId),
-        api.sequences.list(),
-      ])
-      if (loadTokenRef.current !== token) {
-        return
-      }
+      const ref = await api.referrals.info(emailEventId)
+      if (loadTokenRef.current !== token) return
       setReferral(ref)
-      setSequences(sequenceRows.filter((row) => row.status === 'active'))
     } catch (err) {
       console.error('Failed to load referral card data', err)
-      if (loadTokenRef.current !== token) {
-        return
-      }
+      if (loadTokenRef.current !== token) return
       setError(getApiErrorMessage(err, 'Failed to load referral data.'))
     } finally {
-      if (loadTokenRef.current === token) {
-        setLoading(false)
-      }
+      if (loadTokenRef.current === token) setLoading(false)
     }
   }, [emailEventId])
 
-  useEffect(() => {
-    emailEventIdRef.current = emailEventId
+  const retryReferral = useCallback(async () => {
+    const token = ++loadTokenRef.current
+    setLoading(true)
+    setError(null)
+    try {
+      const ref = await api.referrals.retry(emailEventId)
+      if (loadTokenRef.current !== token) return
+      setReferral(ref)
+    } catch (err) {
+      console.error('Failed to retry referral extraction', err)
+      if (loadTokenRef.current !== token) return
+      setError(getApiErrorMessage(err, 'Failed to extract referral.'))
+    } finally {
+      if (loadTokenRef.current === token) setLoading(false)
+    }
   }, [emailEventId])
 
   useEffect(() => {
     setDismissed(false)
-    setEnrolled(false)
-    setEnrolling(false)
-    setSelectedSequenceId('')
-    enrollTokenRef.current += 1
     void loadReferral()
   }, [loadReferral])
 
-  const handleEnroll = async () => {
-    if (!selectedSequenceId || !referral?.has_email) {
-      return
-    }
-    const targetEventId = emailEventIdRef.current
-    const enrollToken = ++enrollTokenRef.current
-    setEnrolling(true)
-    setError(null)
-    try {
-      await api.referrals.enroll(targetEventId, selectedSequenceId)
-      if (emailEventIdRef.current !== targetEventId) {
-        return
-      }
-      setEnrolled(true)
-    } catch (err) {
-      console.error('Failed to enroll referral', err)
-      if (emailEventIdRef.current !== targetEventId) {
-        return
-      }
-      setError(getApiErrorMessage(err, 'Failed to enroll referral.'))
-    } finally {
-      if (enrollTokenRef.current === enrollToken) {
-        setEnrolling(false)
-      }
-    }
-  }
-
-  if (dismissed || enrolled) {
+  if (dismissed) {
     return null
   }
 
-  if (loading) {
+  if (loading && !referral && !error) {
     return null
   }
 
   if (!referral) {
     return (
       <ReferralCardShell onDismiss={() => setDismissed(true)}>
-        {error ? (
+        {loading ? (
+          <p className="text-sm text-gray-500">Retrying…</p>
+        ) : error ? (
           <p role="alert" className="text-sm text-gray-700">
             {error}
           </p>
@@ -135,13 +103,15 @@ export default function ReferralCard({ emailEventId }: ReferralCardProps) {
             Referral details are not available for this reply yet.
           </p>
         )}
-        <button
-          type="button"
-          onClick={() => void loadReferral()}
-          className="mt-3 rounded-md border border-violet-300 bg-white px-3 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100"
-        >
-          Retry
-        </button>
+        {!loading && (
+          <button
+            type="button"
+            onClick={() => void retryReferral()}
+            className="mt-3 rounded-md border border-violet-300 bg-white px-3 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100"
+          >
+            Retry
+          </button>
+        )}
       </ReferralCardShell>
     )
   }
@@ -176,42 +146,19 @@ export default function ReferralCard({ emailEventId }: ReferralCardProps) {
         </p>
       )}
 
-      {!referral.has_email ? (
-        <p className="mt-3 text-xs text-amber-700">
-          Email missing - cannot auto-enroll. Ask the referrer for the email.
+      {referral.enrolled ? (
+        <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+          <CheckCircle size={14} />
+          Auto-enrolled into referral outreach sequence
         </p>
-      ) : sequences.length === 0 ? (
-        <p className="mt-3 text-xs text-gray-600">
-          No active sequences available. Activate a sequence to enroll this referral.
+      ) : !referral.has_email ? (
+        <p className="mt-3 text-xs text-amber-700">
+          Email missing — cannot auto-enroll. Ask the referrer for the email.
         </p>
       ) : (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <label htmlFor={`referral-sequence-${emailEventId}`} className="sr-only">
-            Select active sequence
-          </label>
-          <select
-            id={`referral-sequence-${emailEventId}`}
-            value={selectedSequenceId}
-            onChange={(event) => setSelectedSequenceId(event.target.value)}
-            disabled={enrolling}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-violet-500 focus:outline-none"
-          >
-            <option value="">Select active sequence...</option>
-            {sequences.map((sequence) => (
-              <option key={sequence.id} value={sequence.id}>
-                {sequence.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleEnroll}
-            disabled={!selectedSequenceId || enrolling}
-            className="rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-violet-300"
-          >
-            {enrolling ? 'Enrolling...' : 'Enroll'}
-          </button>
-        </div>
+        <p className="mt-3 text-xs text-gray-500">
+          Pending auto-enrollment into referral outreach sequence.
+        </p>
       )}
     </ReferralCardShell>
   )

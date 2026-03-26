@@ -68,6 +68,25 @@ async def _isolated_session_factory() -> AsyncGenerator[async_sessionmaker[Async
 
 
 @pytest_asyncio.fixture
+async def db(
+    _isolated_session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncGenerator[AsyncSession, None]:
+    """Direct DB session for seeding test data; auto-committed on exit.
+
+    Shares the same isolated engine as `client` so seeded rows are visible
+    to subsequent HTTP requests made through the `client` fixture.
+    Call `await db.commit()` mid-test to flush seeds before making client requests.
+    """
+    async with _isolated_session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+@pytest_asyncio.fixture
 async def client(
     _isolated_session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncGenerator[AsyncClient, None]:

@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import logging
 import secrets
 import time
 
@@ -10,6 +11,8 @@ from app.core.config import settings
 from app.integrations.nylas_client import NylasClient
 from app.repositories.nylas_account_repo import NylasAccountRepository
 from app.schemas.nylas import NylasConnectionStatus
+
+logger = logging.getLogger(__name__)
 
 _OAUTH_STATE_TTL_SECONDS = 600
 
@@ -31,6 +34,7 @@ class NylasConnectionService:
             email=grant_data["email"],
             provider=grant_data.get("provider", "unknown"),
         )
+        await self._ensure_webhook_registered()
 
     async def get_connection_status(self) -> NylasConnectionStatus:
         account = await self._repo.get_first()
@@ -45,6 +49,36 @@ class NylasConnectionService:
 
     async def disconnect(self) -> None:
         await self._repo.delete_all()
+
+    async def _ensure_webhook_registered(self) -> None:
+        """Register a Nylas webhook for message.created if configured and not already present."""
+        webhook_url = settings.nylas_webhook_url
+        if not webhook_url:
+            logger.debug("NYLAS_WEBHOOK_URL not set, skipping webhook registration")
+            return
+
+        try:
+            existing = await asyncio.to_thread(self._client.list_webhooks)
+            for wh in existing:
+                if wh.get("webhook_url") == webhook_url:
+                    logger.debug("Webhook already registered at %s", webhook_url)
+                    return
+
+            result = await asyncio.to_thread(
+                self._client.create_webhook,
+                webhook_url,
+                ["message.created"],
+            )
+            webhook_secret = result.get("webhook_secret", "")
+            if webhook_secret:
+                await self._repo.set_webhook_secret(webhook_secret)
+            logger.info(
+                "Registered Nylas webhook at %s (id=%s)",
+                webhook_url,
+                result.get("id"),
+            )
+        except Exception:
+            logger.exception("Failed to register Nylas webhook — polling will catch messages")
 
     def generate_oauth_state(self) -> str:
         issued_at = str(int(time.time()))
