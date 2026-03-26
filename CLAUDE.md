@@ -33,7 +33,7 @@ Optional: copy root `.env.example` → `.env` to override DB/redis URLs (default
 ## Layout
 
 ```
-backend/app/          # FastAPI app — main.py, core/config, database, models/, api/, services/, repositories/, schemas/
+backend/app/          # FastAPI app — main.py, core/config, database, models/, api/, services/, repositories/, schemas/, utils/
 backend/alembic/      # Migrations (async env uses settings.database_url)
 frontend/src/         # React — pages/, components/, lib/api.ts + types.ts
 docs/architecture/    # System design
@@ -68,7 +68,7 @@ Vite proxies `/api` and `/health` to `VITE_DEV_PROXY_TARGET` (Compose sets `http
 - **Redis:** No host port in Compose (avoids conflict with a local Redis on 6379); backend uses `redis:6379` on the internal network.
 - **Postgres:** Published as `127.0.0.1:5432:5432` only.
 - **README.md** env snippet may show `postgresql://` for DB; backend Settings expect **`+asyncpg`** — align when debugging connection errors.
-- **API integration tests:** `tests/test_sequences_api.py` needs `TEST_DATABASE_URL` (see `backend/CLAUDE.md` for the Compose one-liner and truncate safety flag).
+- **API integration tests:** `tests/test_*_api.py` files need `TEST_DATABASE_URL` (see `backend/CLAUDE.md` for the Compose one-liner and truncate safety flag). Shared fixtures live in `tests/conftest.py`.
 
 ## Universal implementation rules
 
@@ -86,7 +86,7 @@ Use these defaults unless the user explicitly overrides. These rules apply to al
 - **Regression test rule:** When a bug or issue is identified, add a regression test that reproduces the failure. Then have subagents try to fix the bug and prove it with a passing test.
 - **No inline imports:** All imports must be at the top of the file. Never use inline/local imports inside functions or methods.
 - **No `from __future__ import annotations`:** The project targets Python 3.13+. PEP 604 unions (`X | Y`) and forward references work natively. Do not add `from __future__ import annotations`.
-- **Service DI:** Services receive repositories via constructor injection, not `AsyncSession`. The API dependency factory wires `Repository(db)` → `Service(repo)`. Services must not import SQLAlchemy.
+- **Service DI:** Services receive repositories via constructor injection. For single-repo services use `Service(repo)`. For multi-repo services (e.g. `EnrollmentService`) the API factory may pass the session and let the service construct its repos internally — but services must still avoid importing SQLAlchemy types in their business logic.
 - **No union types for route dispatch:** Do not use `SchemaA | SchemaB` in FastAPI route parameters for implicit dispatch via `isinstance`. Use separate endpoints instead.
 - **No dead infrastructure:** Do not add DB columns, service methods, or config fields for features that have no consumer in the current plan. Add them when the consuming code is built.
 

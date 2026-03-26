@@ -24,3 +24,4 @@ npm run lint
 - All API response types live in `src/lib/types.ts` — single source for frontend/backend contract alignment.
 - Use `ApiRequestError` from `src/lib/api.ts` for typed error handling in catch blocks.
 - Always add `console.error` as the first line in every catch block before setting UI error state.
+- Components use `export default function ComponentName` — no named exports for components.

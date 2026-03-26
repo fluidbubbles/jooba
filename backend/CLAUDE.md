@@ -31,4 +31,4 @@ docker compose exec backend alembic upgrade head
 
 - Keep DB URL format as `postgresql+asyncpg://...`.
 - If implementation differs from docs, align code toward architecture while preserving current working behavior.
-- **Integration tests require:** `TEST_DATABASE_URL` env var and `ALLOW_TEST_DB_TRUNCATE=1` for safety. Run via: `docker compose exec -e TEST_DATABASE_URL=postgresql+asyncpg://jooba:jooba@db:5432/jooba -e ALLOW_TEST_DB_TRUNCATE=1 backend python -m pytest tests/test_sequences_api.py -v`
+- **Integration tests require:** `TEST_DATABASE_URL` env var and `ALLOW_TEST_DB_TRUNCATE=1` for safety. Shared fixtures (DB isolation, client) live in `tests/conftest.py`. Run via: `docker compose exec -e TEST_DATABASE_URL=postgresql+asyncpg://jooba:jooba@db:5432/jooba -e ALLOW_TEST_DB_TRUNCATE=1 backend python -m pytest tests/ -v`

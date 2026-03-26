@@ -11,6 +11,7 @@ Architecture source: `docs/architecture/architecture.md`.
 - `models/`: ORM entities, relationships, enum definitions.
 - `schemas/`: request/response contract types.
 - `tasks/` (when added): thin async wrappers with retry policy, no business logic.
+- `utils/`: stateless helpers (crypto, formatting) with no DB or business-rule dependencies.
 - `integrations/` (when added): provider adapters (Nylas/OpenAI/mock), no business rules.
 
 ## Cross-package architecture rules

@@ -7,7 +7,8 @@ Architecture source: `docs/architecture/architecture.md` (Layered Architecture +
 
 - Keep schemas as API contracts only (request/response shape and basic field constraints).
 - Prefer explicit field bounds (`min_length`, `max_length`, `ge`, etc.) for input guardrails.
-- Use `model_config = {"from_attributes": True}` for ORM-backed response schemas.
+- ORM-backed response schemas inherit from a `_OrmSchema` base class using `ConfigDict(from_attributes=True)`.
+- Write/input request schemas use `ConfigDict(extra="forbid")` to reject unexpected fields.
 - Keep workflow/state-machine validation in services when it depends on business state.
 - Keep schema field names domain-level; do not leak persistence naming details (for example `delay_minutes`) into public API contracts.
 - Avoid module-level `__all__` lists unless wildcard export compatibility is explicitly required.
