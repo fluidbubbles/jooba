@@ -14,10 +14,10 @@ An end-to-end web app that automates recruiter email outreach. Connect an email 
 ### 2. Configure environment
 
 ```bash
-cp backend/.env.example backend/.env
+cp .env.example .env
 ```
 
-Edit `backend/.env`:
+Edit `.env`:
 
 ```env
 NYLAS_CLIENT_ID=your-nylas-client-id
@@ -46,7 +46,7 @@ The first command starts all five services (API, frontend, worker, beat schedule
 | http://localhost:3000 | React UI |
 | http://localhost:8000/docs | API docs |
 
-> **Note:** For local development without API keys, set `EMAIL_PROVIDER=mock` and `LLM_PROVIDER=mock` in your `backend/.env`. Emails will be logged instead of sent and classification will return dummy results.
+> **Note:** For local development without API keys, set `EMAIL_PROVIDER=mock` and `LLM_PROVIDER=mock` in your `.env`. Emails will be logged instead of sent and classification will return dummy results.
 
 ### 4. Connect your email
 
