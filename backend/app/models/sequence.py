@@ -1,11 +1,15 @@
 import uuid
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.models.enums import SequenceStatus
+
+if TYPE_CHECKING:
+    from app.models.enrollment import Enrollment
 
 
 class Sequence(Base):
@@ -16,9 +20,6 @@ class Sequence(Base):
     status: Mapped[str] = mapped_column(String(20), default=SequenceStatus.DRAFT.value)
     role_title: Mapped[str | None] = mapped_column(String(255))
     company: Mapped[str | None] = mapped_column(String(255))
-    about_company: Mapped[str | None] = mapped_column(Text)
-    selling_points: Mapped[str | None] = mapped_column(Text)
-    tone: Mapped[str | None] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

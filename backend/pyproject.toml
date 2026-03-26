@@ -6,7 +6,7 @@ authors = [
     {name = "admin"}
 ]
 readme = "README.md"
-requires-python = "^3.13"
+requires-python = ">=3.13,<4.0"
 dependencies = [
     "fastapi (>=0.135.2,<0.136.0)",
     "uvicorn[standard] (>=0.42.0,<0.43.0)",
@@ -18,7 +18,8 @@ dependencies = [
     "nylas (>=6.14.2,<7.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
     "python-multipart (>=0.0.22,<0.0.23)",
-    "pydantic-settings (>=2.13.1,<3.0.0)"
+    "pydantic-settings (>=2.13.1,<3.0.0)",
+    "greenlet (>=3.3.2,<4.0.0)"
 ]
 
 

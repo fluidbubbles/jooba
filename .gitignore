@@ -3,7 +3,7 @@ docs/screenshots
 docs/superpowers
 docs/summaries
 docs/original_task
-
+.remember/
 # Python
 __pycache__/
 *.py[cod]
@@ -11,6 +11,8 @@ __pycache__/
 .venv/
 *.egg
 .python-version
+*.pytest_cache/
+.ruff_cache/
 
 # Node
 node_modules/

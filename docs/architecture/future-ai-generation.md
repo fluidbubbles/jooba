@@ -1,6 +1,8 @@
 # Future: AI Sequence Generation
 
 > This content was extracted from the main architecture document. It describes v2 features not built in v1.
+>
+> In v1, `about_company`, `selling_points`, and `tone` are intentionally **not** stored as `Sequence` table columns. When AI generation is implemented, these values should be provided as generation request/prompt context, not persisted as standalone sequence metadata columns.
 
 ---
 
@@ -23,7 +25,7 @@ SequenceTemplate
 
 **Built-in templates** ship with the app (3-4 common patterns). **User templates** are created when a recruiter saves a successful generation config for reuse ("Save as Template").
 
-When a recruiter selects a template, it pre-fills the tone, step count, and custom instructions. They still provide role, company, and selling points — those are always specific to the job.
+When a recruiter selects a template, it pre-fills the tone, step count, and custom instructions. They still provide role, company, and generation context (`about_company`, `selling_points`, `tone`) at generation time.
 
 ## AI Generation Flow
 
@@ -77,20 +79,21 @@ Recruiter reviews, edits subject/body/delays as needed
 
 ## Save Flow: Generation-Specific Fields
 
-When saving an AI-generated sequence, the request body includes a `template_id` in the metadata:
+When saving an AI-generated sequence, keep persisted sequence metadata focused on sequence identity/context and pass generation-only inputs as request context:
 
 ```
 Frontend → POST /api/sequences
            {
              name, steps: StepInput[],
-             metadata: { role_title, company, about_company,
-                         selling_points, tone, template_id }
+             metadata: { role_title, company, template_id },
+             generation_context: { about_company, selling_points,
+                                   tone, num_steps, custom_instructions }
            }
 ```
 
 The `template_id` records which template was used for generation.
 
-The sequence metadata (role, company, selling points, tone) is stored on the Sequence record. One of its purposes is **re-generation** — if the recruiter wants to regenerate a step, the context is already there.
+`about_company`, `selling_points`, and `tone` remain generation request/prompt inputs and are not persisted as `Sequence` columns in v1.
 
 ## "Save as Template"
 
