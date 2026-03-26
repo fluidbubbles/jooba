@@ -2,9 +2,10 @@ import json
 import logging
 from dataclasses import dataclass
 
-from openai import OpenAI
+from openai import APIError, AuthenticationError, RateLimitError, OpenAI
 
 from app.core.config import settings
+from app.services.exceptions import PermanentError, ProviderRateLimited, TransientError
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +37,22 @@ class OpenAIClient:
 
     def classify_reply(self, reply_text: str) -> ClassificationResult:
         """Classify a candidate reply using the configured OpenAI model."""
-        response = self.client.chat.completions.create(
-            model=settings.openai_model,
-            messages=[
-                {"role": "user", "content": CLASSIFY_PROMPT.format(reply_text=reply_text)},
-            ],
-            temperature=0,
-            max_tokens=150,
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=settings.openai_model,
+                messages=[
+                    {"role": "user", "content": CLASSIFY_PROMPT.format(reply_text=reply_text)},
+                ],
+                temperature=0,
+                max_tokens=150,
+            )
+        except AuthenticationError as exc:
+            raise PermanentError(f"OpenAI authentication error: {exc}") from exc
+        except RateLimitError as exc:
+            raise ProviderRateLimited() from exc
+        except APIError as exc:
+            raise TransientError(f"OpenAI API error: {exc}") from exc
+
         content = response.choices[0].message.content.strip()
         try:
             parsed = json.loads(content)

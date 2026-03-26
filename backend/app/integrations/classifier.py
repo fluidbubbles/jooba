@@ -38,4 +38,6 @@ class MockClassifier(Classifier):
 def get_classifier() -> Classifier:
     if settings.llm_provider == "mock":
         return MockClassifier()
+    if settings.llm_provider != "openai":
+        logger.warning("Unknown llm_provider %r — falling back to OpenAIClassifier", settings.llm_provider)
     return OpenAIClassifier()
