@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = Field(default="")
+    openai_model: str = Field(default="gpt-5-mini")
 
     # App
     secret_key: str = Field(default="change-me-in-production")
