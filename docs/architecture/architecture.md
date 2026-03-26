@@ -191,14 +191,26 @@ This is how the Strategy Pattern (Section 4.4) actually works in practice: the a
 Every database query is isolated in a repository class. Services never import SQLAlchemy.
 
 ```
-EnrollmentRepository
-├── get_by_id(id) → Enrollment
+EnrollmentRepository (Plan 3)
+├── create(candidate_id, sequence_id, unsubscribe_token, next_send_at) → Enrollment
+├── get_by_id(id) → Enrollment | None
+├── get_by_candidate_and_sequence(candidate_id, sequence_id) → Enrollment | None
+├── list_by_sequence(sequence_id, status_filter, limit, offset) → list[dict]
+├── count_by_sequence(sequence_id, status_filter) → int
+├── get_analytics(sequence_id) → dict[str, int]
+└── log_transition(enrollment_id, from_status, to_status, trigger) → None
+
+EnrollmentRepository (Plan 4 additions)
 ├── get_due_enrollments() → list[Enrollment]     # next_send_at <= now, status = active
-├── get_by_sequence(sequence_id) → list[Enrollment]
-├── create(candidate_id, sequence_id, ...) → Enrollment
 ├── update_status(id, new_status) → Enrollment
 ├── set_next_send(id, datetime) → None
 └── clear_next_send(id) → None
+
+CandidateRepository
+├── get_by_email(email) → Candidate | None
+├── get_by_id(candidate_id) → Candidate | None
+├── create(email, first_name, last_name, company, title) → Candidate
+└── get_or_create(email, **kwargs) → tuple[Candidate, bool]
 
 EmailEventRepository
 ├── ...
@@ -220,13 +232,20 @@ Services own all business rules. A service method reads like a description of wh
 **EnrollmentService:**
 
 ```
-EnrollmentService
+EnrollmentService (Plan 3 — implemented)
 ├── enroll_candidates(sequence_id, candidates: list[CandidateInput])
-│   → deduplicate by email, get-or-create candidates,
-│     create enrollments, generate unsubscribe tokens,
-│     compute next_send_at, log transitions
+│   → validate sequence is active, deduplicate by email,
+│     get-or-create candidates, create enrollments,
+│     generate unsubscribe tokens, log transitions
 │   (receives structured data from API layer, NOT raw CSV)
 │
+├── list_enrollments(sequence_id, status_filter, limit, offset)
+│   → verify sequence exists, query enrollments with pagination
+│
+├── get_analytics(sequence_id)
+│   → verify sequence exists, return aggregated status/sentiment counts
+
+EnrollmentService (Plan 4 additions — email sending + webhooks)
 ├── advance_step(enrollment_id)
 │   → _validate_sendable(enrollment)      — check status == ACTIVE
 │   → _compose_email(enrollment)          — template replacement + footer
@@ -585,8 +604,8 @@ API Layer: validates request body via Pydantic schema
         ▼
 Service Layer: enrollment_service.enroll_candidates(sequence_id, candidates)
   │
-  │  (receives structured data, NOT raw CSV — see utils/csv_parser.py
-  │   for server-side parsing if CSV upload goes through multipart)
+  │  (receives structured data, NOT raw CSV — CSV parsing happens
+  │   client-side in CsvUploadModal.tsx via Papa Parse)
   │
   ├── Deduplicate by email within the batch
   │
@@ -605,7 +624,7 @@ Service Layer: enrollment_service.enroll_candidates(sequence_id, candidates)
   │   │   )
   │   └── _log_transition(enrollment, null → ACTIVE, trigger="enrolled")
   │
-  └── Return: { enrolled: 142, already_existed: 8, total: 150 }
+  └── Return: { enrolled: 142, skipped: 8, total: 150 }
         │
         ▼
 API Layer: returns enrollment summary to frontend
@@ -1178,18 +1197,17 @@ backend/
 │   │   └── dispatcher.py            # Task dispatcher abstraction (CeleryDispatcher, SyncDispatcher)
 │   │
 │   ├── api/                         # Route handlers (thin)
-│   │   ├── sequences.py
-│   │   ├── candidates.py
-│   │   ├── enrollments.py
-│   │   ├── replies.py
-│   │   ├── analytics.py
-│   │   ├── nylas.py                 # OAuth + webhook
-│   │   └── unsubscribe.py           # Public, no auth
+│   │   ├── sequences.py             # Sequence CRUD + status transitions
+│   │   ├── enrollments.py           # Enroll, list enrollments, analytics
+│   │   ├── exception_handlers.py    # Domain error → HTTP mapping
+│   │   ├── health.py                # Health check endpoint
+│   │   ├── nylas.py                 # OAuth + webhook (Plan 4)
+│   │   ├── replies.py               # Inbox + manual reply (Plan 5)
+│   │   └── unsubscribe.py           # Public, no auth (Plan 4)
 │   │
 │   └── utils/
-│       ├── tokens.py                # HMAC sign/verify for unsubscribe
-│       ├── templates.py             # {{placeholder}} replacement logic
-│       └── csv_parser.py            # CSV parsing utility
+│       ├── unsubscribe.py           # HMAC sign/verify for unsubscribe tokens
+│       └── templates.py             # {{placeholder}} replacement logic (Plan 4)
 │
 ├── alembic/                         # Database migrations
 ├── tests/
