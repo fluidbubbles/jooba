@@ -1,0 +1,6 @@
+email,first_name,company
+valid@test.com,Valid,GoodCorp
+not-an-email,Bad,BadCorp
+also invalid,Also Bad,BadCorp2
+another@valid.com,Another,GoodCorp2
+@missing-local.com,Missing,MissCorp

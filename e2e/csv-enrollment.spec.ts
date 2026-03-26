@@ -231,30 +231,38 @@ test.describe('CSV Enrollment — Error Handling', () => {
     await expect(page.getByText('Drag & drop a CSV file here')).toBeVisible()
   })
 
-  test('enrolling into a paused sequence shows error', async ({ page }) => {
+  test('paused sequence hides upload button (UI prevents enrollment)', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
 
     // Pause the sequence
     await page.getByRole('button', { name: 'Pause' }).click()
-    await expect(page.getByText('Paused')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
 
-    // Try uploading
-    await openUploadModal(page)
-    await uploadCsvFile(page, 'good_candidates.csv')
+    // Upload CSV button should not be visible
+    await expect(page.getByRole('button', { name: 'Upload CSV' })).not.toBeVisible()
 
-    // Click Enroll — modal stays open with error
-    const dialog = page.getByRole('dialog')
-    const enrollBtn = dialog.getByRole('button', { name: /^Enroll \d+/ })
-    await enrollBtn.click()
-
-    // Should show error in modal
-    const alert = dialog.getByRole('alert')
-    await expect(alert).toBeVisible()
-    await expect(alert).toContainText(/paused/i)
-
-    // Close and resume for other tests
-    await page.getByRole('button', { name: /Close dialog/ }).click()
+    // Resume for other tests
     await page.getByRole('button', { name: 'Resume' }).click()
+  })
+
+  test('enrolling into paused sequence via API returns 400', async ({ page }) => {
+    // Create and pause via API
+    const createResp = await page.request.post('/api/sequences', {
+      data: {
+        name: 'Paused API Test',
+        steps: [{ subject: 'S', body_html: '<p>B</p>', delay: 0 }],
+      },
+    })
+    const { id } = await createResp.json()
+    await page.request.put(`/api/sequences/${id}/status`, { data: { status: 'active' } })
+    await page.request.put(`/api/sequences/${id}/status`, { data: { status: 'paused' } })
+
+    const resp = await page.request.post(`/api/sequences/${id}/enroll`, {
+      data: { candidates: [{ email: 'test@example.com' }] },
+    })
+    expect(resp.status()).toBe(400)
+    const body = await resp.json()
+    expect(body.code).toBe('INVALID_SEQUENCE_DATA')
   })
 
   test('non-CSV file shows parse error', async ({ page }) => {
@@ -465,26 +473,25 @@ test.describe('CSV Enrollment — Pause/Resume with Candidates', () => {
     await page.close()
   })
 
-  test('pause keeps candidates visible, resume restores upload ability', async ({ page }) => {
+  test('pause hides upload button, candidates stay visible, resume restores upload', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
     await expect(page.getByText('3 candidates', { exact: true })).toBeVisible()
 
     // Pause
     await page.getByRole('button', { name: 'Pause' }).click()
-    // Status badge (not the filter option) shows "Paused"
     await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
 
     // Candidates still visible
     await expect(page.getByText('3 candidates', { exact: true })).toBeVisible()
 
-    // Upload CSV button still present on paused sequence
-    await expect(page.getByRole('button', { name: 'Upload CSV' }).first()).toBeVisible()
+    // Upload CSV button is HIDDEN on paused sequences
+    await expect(page.getByRole('button', { name: 'Upload CSV' })).not.toBeVisible()
 
     // Resume
     await page.getByRole('button', { name: 'Resume' }).click()
     await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible()
 
-    // Candidates still shown, upload still works
+    // Upload CSV reappears after resume
     await expect(page.getByText('3 candidates', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Upload CSV' }).first()).toBeVisible()
   })
@@ -506,6 +513,64 @@ test.describe('CSV Enrollment — Analytics', () => {
     // Wait for analytics to load — the Enrolled stat card should show 5
     await expect(page.getByText('Enrolled').locator('..').getByText('5')).toBeVisible()
     await expect(page.getByText('Sent').locator('..').getByText('0')).toBeVisible()
+  })
+})
+
+test.describe('CSV Enrollment — Invalid Email Validation', () => {
+  let seqId: string
+
+  test.beforeAll(async ({ browser }) => {
+    const page = await browser.newPage()
+    seqId = await createAndActivateSequence(page, `E2E InvalidEmail ${Date.now()}`)
+    await page.close()
+  })
+
+  test('CSV with mix of valid and invalid emails shows warning and skips bad rows', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+    await openUploadModal(page)
+    await uploadCsvFile(page, 'invalid_emails.csv')
+
+    const dialog = page.getByRole('dialog')
+    // Preview should show only 2 valid candidates
+    await expect(dialog.getByText(/Parsed.*2.*candidates/)).toBeVisible()
+    await expect(dialog.getByText('valid@test.com')).toBeVisible()
+    await expect(dialog.getByText('another@valid.com')).toBeVisible()
+
+    // Warning banner (amber) about skipped rows
+    await expect(dialog.getByRole('status')).toBeVisible()
+    await expect(dialog.getByRole('status')).toContainText(/3 row.*skipped.*invalid email/i)
+
+    await clickEnrollAndWait(page)
+    await expect(page.getByRole('alert').filter({ hasText: /Enrolled 2/ })).toBeVisible()
+  })
+
+  test('CSV with all invalid emails shows error', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+    await openUploadModal(page)
+    await uploadCsvFile(page, 'all_invalid_emails.csv')
+
+    const alert = page.getByRole('dialog').getByRole('alert')
+    await expect(alert).toBeVisible()
+    await expect(alert).toContainText(/No valid rows found/)
+    await expect(alert).toContainText(/3 row.*invalid email/i)
+  })
+})
+
+test.describe('CSV Enrollment — Upload Hidden on Non-Active', () => {
+  test('paused sequence with no candidates hides empty state upload action', async ({ page }) => {
+    // Create, activate, then pause — no candidates enrolled
+    const seqPage = await page.context().newPage()
+    const seqId = await createAndActivateSequence(seqPage, `E2E PausedEmpty ${Date.now()}`)
+    await seqPage.close()
+
+    // Pause via API
+    await page.request.put(`/api/sequences/${seqId}/status`, { data: { status: 'paused' } })
+
+    await page.goto(`/sequences/${seqId}`)
+    await expect(page.getByText('No candidates enrolled yet')).toBeVisible()
+
+    // The empty state should NOT have an "Upload CSV" action button
+    await expect(page.getByRole('button', { name: 'Upload CSV' })).not.toBeVisible()
   })
 })
 

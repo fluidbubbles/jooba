@@ -17,6 +17,8 @@ All CSV files are pre-created in `docs/superpowers/plans/test-data/`:
 | `email_only.csv` | Only an email column, no name/company/title |
 | `empty.csv` | Headers only, no data rows |
 | `duplicates_in_file.csv` | Same email repeated with different casing |
+| `invalid_emails.csv` | Mix of valid and invalid email formats |
+| `all_invalid_emails.csv` | All rows have invalid email formats |
 
 ---
 
@@ -269,22 +271,17 @@ fetch('/api/sequences/00000000-0000-0000-0000-000000000099/analytics')
 ## Test 15: Pause and Resume with Candidates
 
 ### 15.1 Pause the active sequence
-1. On the sequence detail page (active, 11 candidates)
+1. On the sequence detail page (active, with candidates)
 2. Click **Pause**
 3. **Verify:** Status changes to **Paused**
-4. **Verify:** "Upload CSV" button is still visible (paused sequences allow upload)
-5. **Verify:** Candidates table still shows all 11 candidates
+4. **Verify:** "Upload CSV" button is **NOT** visible in header (only active sequences show it)
+5. **Verify:** Candidates table still shows all candidates
+6. **Verify:** Empty state "Upload CSV" action button is also hidden (no `onUploadCsv` prop)
 
-### 15.2 Upload while paused
-1. Click **Upload CSV**
-2. Try uploading `good_candidates.csv`
-3. **Verify:** Error toast appears — cannot enroll into a paused sequence
-4. **Verify:** Error message mentions "paused" and "Activate it first"
-
-### 15.3 Resume the sequence
+### 15.2 Resume the sequence
 1. Click **Resume**
 2. **Verify:** Status returns to **Active**
-3. **Verify:** Upload CSV button still present, candidates still shown
+3. **Verify:** Upload CSV button reappears in header, candidates still shown
 
 ---
 
@@ -294,6 +291,56 @@ fetch('/api/sequences/00000000-0000-0000-0000-000000000099/analytics')
 1. Open Upload CSV modal
 2. The file picker should filter to `.csv` only, but if you can select another file type:
 3. **Verify:** Either the file picker blocks it, or the parser shows an error: "Could not parse this file. Make sure it is a valid CSV."
+
+---
+
+## Test 17: Invalid Email Validation
+
+### 17.1 CSV with mix of valid and invalid emails
+1. Click **Upload CSV**
+2. Select `invalid_emails.csv` (has 2 valid + 3 invalid email rows)
+3. **Verify:** Preview shows only the 2 valid candidates (`valid@test.com`, `another@valid.com`)
+4. **Verify:** Amber warning banner appears: "3 row(s) were skipped because they had invalid email format."
+5. Click **Enroll 2**
+6. **Verify:** Success toast: "Enrolled 2 candidates."
+
+### 17.2 CSV with all invalid emails
+1. Click **Upload CSV**
+2. Select `all_invalid_emails.csv`
+3. **Verify:** Error: "No valid rows found. 3 row(s) had invalid email format."
+
+---
+
+## Test 18: Focus Trap and Keyboard Navigation
+
+### 18.1 Focus moves to close button on open
+1. Open Upload CSV modal
+2. **Verify:** The close (X) button receives focus automatically
+
+### 18.2 Tab cycles within modal
+1. With the modal open (drop zone visible), press **Tab** repeatedly
+2. **Verify:** Focus cycles through the modal elements (close button, drop zone) and does NOT escape to the page behind
+3. Press **Shift+Tab**
+4. **Verify:** Focus cycles backwards within the modal
+
+### 18.3 Focus restores on close
+1. Click the **Upload CSV** button to open the modal (note: it was the focused button)
+2. Close the modal (via X or Escape)
+3. **Verify:** Focus returns to the Upload CSV button that was focused before
+
+---
+
+## Test 19: Upload CSV Hidden on Non-Active Sequences
+
+### 19.1 Draft sequence hides upload everywhere
+1. Create a new draft sequence
+2. **Verify:** No "Upload CSV" button in header
+3. **Verify:** Empty state shows "No candidates enrolled yet" but the "Upload CSV" action button is hidden
+
+### 19.2 Paused sequence hides upload everywhere
+1. Create and activate a sequence, then pause it
+2. **Verify:** No "Upload CSV" button in header
+3. **Verify:** If no candidates, empty state shows but "Upload CSV" action button is hidden
 
 ---
 
@@ -310,10 +357,13 @@ fetch('/api/sequences/00000000-0000-0000-0000-000000000099/analytics')
 | 7 | No email column | Error with column list shown | |
 | 8 | Empty CSV | "No valid rows" error | |
 | 9 | Modal dismiss (X / Escape / backdrop / Cancel) | All four dismissal paths work | |
-| 10 | Status filter dropdown | Filters candidates correctly | |
+| 10 | Status filter dropdown | Filters all 6 statuses correctly | |
 | 11 | Enroll on draft sequence | 400 INVALID_SEQUENCE_DATA | |
 | 12 | Enroll on nonexistent sequence | 404 SEQUENCE_NOT_FOUND | |
 | 13 | Analytics endpoint | Returns correct counts | |
 | 14 | Drag and drop | File parsed same as file picker | |
-| 15 | Pause/resume with candidates | Pause blocks enrollment, resume restores | |
+| 15 | Pause/resume with candidates | Pause hides upload, resume restores | |
 | 16 | Non-CSV file | Parse error or file picker blocks | |
+| 17 | Invalid email validation | Bad emails skipped with warning, all-bad shows error | |
+| 18 | Focus trap + keyboard nav | Focus auto-set, Tab trapped, focus restored on close | |
+| 19 | Upload CSV hidden on non-active | Draft + paused hide upload button everywhere | |
