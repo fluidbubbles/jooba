@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -9,14 +10,9 @@ from app.models.email_event import EmailEvent
 from app.models.enrollment import Enrollment
 from app.models.enums import EmailDirection
 from app.models.sequence import Sequence
+from app.utils.formatting import format_candidate_name
 
-
-def _format_candidate_name(
-    first_name: str | None, last_name: str | None, email: str
-) -> str:
-    """Build a display name from name parts, falling back to the email local part."""
-    parts = [p for p in (first_name, last_name) if p]
-    return " ".join(parts) if parts else email.split("@")[0]
+logger = logging.getLogger(__name__)
 
 
 class EmailEventRepository:
@@ -26,7 +22,7 @@ class EmailEventRepository:
     async def create(
         self,
         enrollment_id: UUID,
-        direction: str,
+        direction: EmailDirection,
         subject: str | None = None,
         body_html: str | None = None,
         body_text: str | None = None,
@@ -37,7 +33,7 @@ class EmailEventRepository:
     ) -> EmailEvent:
         event = EmailEvent(
             enrollment_id=enrollment_id,
-            direction=direction,
+            direction=direction.value,
             subject=subject,
             body_html=body_html,
             body_text=body_text,
@@ -76,11 +72,13 @@ class EmailEventRepository:
     async def update_sentiment(
         self, event_id: UUID, sentiment: str, reasoning: str
     ) -> None:
-        await self._db.execute(
+        result = await self._db.execute(
             update(EmailEvent)
             .where(EmailEvent.id == event_id)
             .values(sentiment=sentiment, sentiment_reasoning=reasoning)
         )
+        if result.rowcount == 0:
+            raise ValueError(f"EmailEvent {event_id} not found for sentiment update")
         await self._db.flush()
 
     async def get_thread(self, enrollment_id: UUID) -> list[EmailEvent]:
@@ -133,7 +131,7 @@ class EmailEventRepository:
                 "sentiment": row.sentiment,
                 "sentiment_reasoning": row.sentiment_reasoning,
                 "created_at": row.created_at,
-                "candidate_name": _format_candidate_name(
+                "candidate_name": format_candidate_name(
                     row.first_name, row.last_name, row.candidate_email
                 ),
                 "candidate_email": row.candidate_email,
