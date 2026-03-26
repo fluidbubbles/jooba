@@ -12,7 +12,7 @@ class CandidateRepository:
 
     async def get_by_email(self, email: str) -> Candidate | None:
         result = await self._db.execute(
-            select(Candidate).where(Candidate.email == email.lower())
+            select(Candidate).where(Candidate.email == email.strip().lower())
         )
         return result.scalar_one_or_none()
 
