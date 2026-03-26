@@ -11,15 +11,18 @@ const TEST_DATA = path.resolve(__dirname, '../docs/superpowers/plans/test-data')
 async function createAndActivateSequence(page: Page, name: string): Promise<string> {
   await page.goto('/sequences/new')
 
-  await page.getByLabel('Name').fill(name)
+  await page.getByLabel('Sequence name').fill(name)
   await page.locator('#step-0-subject').fill('Hey there')
   await page.locator('#step-0-body').fill('Interested in a role?')
 
-  await page.getByRole('button', { name: 'Save & activate' }).click()
+  await page.getByRole('button', { name: 'Save' }).click()
 
   // Wait for redirect to sequence detail
   await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
   await expect(page.getByText(name)).toBeVisible()
+
+  // Activate from the detail page
+  await page.getByRole('button', { name: 'Activate' }).click()
 
   // Extract sequence ID from URL
   const url = page.url()
@@ -30,11 +33,11 @@ async function createAndActivateSequence(page: Page, name: string): Promise<stri
 async function createDraftSequence(page: Page, name: string): Promise<string> {
   await page.goto('/sequences/new')
 
-  await page.getByLabel('Name').fill(name)
+  await page.getByLabel('Sequence name').fill(name)
   await page.locator('#step-0-subject').fill('Draft subject')
   await page.locator('#step-0-body').fill('Draft body')
 
-  await page.getByRole('button', { name: 'Save draft' }).click()
+  await page.getByRole('button', { name: 'Save' }).click()
 
   await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
   const url = page.url()

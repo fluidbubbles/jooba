@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, MoreVertical, Search } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiRequestError } from '../lib/api'
 import type { SequenceListItem, SequenceStatus } from '../lib/types'
 import StatusBadge from './StatusBadge'
@@ -221,7 +221,9 @@ export default function SequencesTable({ statusFilter, sort }: SequencesTablePro
                     onClick={() => navigate(`/sequences/${row.id}`)}
                   >
                     <td className="whitespace-nowrap px-4 py-3 font-medium text-blue-600">
-                      {row.name}
+                      <Link to={`/sequences/${row.id}`} onClick={(e) => e.stopPropagation()}>
+                        {row.name}
+                      </Link>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
                       <StatusBadge status={row.status} />

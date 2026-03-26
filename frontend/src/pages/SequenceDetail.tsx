@@ -34,11 +34,11 @@ function sortedSteps(seq: Sequence) {
 }
 
 function formatStepDelay(stepIndex: number, delay: number): string {
-  const dayLabel = `${delay} day${delay === 1 ? '' : 's'}`
+  const label = `${delay} min`
   if (stepIndex === 0) {
-    return delay === 0 ? 'Sends immediately' : `Delay: ${dayLabel}`
+    return delay === 0 ? 'Sends immediately' : `Delay: ${label}`
   }
-  return `Delay after previous: ${dayLabel}`
+  return `Delay after previous: ${label}`
 }
 
 function bodyPlainText(bodyHtml: string): string {
