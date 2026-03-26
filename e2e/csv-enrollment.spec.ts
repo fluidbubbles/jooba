@@ -65,6 +65,15 @@ async function clickEnrollAndWait(page: Page) {
   await expect(dialog).not.toBeVisible({ timeout: 10_000 })
 }
 
+/** Enroll candidates via API (faster for test setup). */
+async function enrollViaApi(page: Page, seqId: string, emails: string[]) {
+  await page.request.post(`/api/sequences/${seqId}/enroll`, {
+    data: {
+      candidates: emails.map((email, i) => ({ email, first_name: `User${i + 1}` })),
+    },
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -126,7 +135,7 @@ test.describe('CSV Enrollment — Happy Path', () => {
 
   test('flexible column headers are recognized', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
-    await expect(page.getByText(/candidates/)).toBeVisible()
+    await expect(page.getByText(/candidates/, { exact: false })).toBeVisible()
 
     await openUploadModal(page)
     await uploadCsvFile(page, 'weird_headers.csv')
@@ -147,16 +156,17 @@ test.describe('CSV Enrollment — Happy Path', () => {
     await uploadCsvFile(page, 'email_only.csv')
 
     // Preview shows emails, other columns show em dash
-    await expect(page.getByText('solo@test.com')).toBeVisible()
-    await expect(page.getByText('minimal@test.com')).toBeVisible()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('solo@test.com')).toBeVisible()
+    await expect(dialog.getByText('minimal@test.com')).toBeVisible()
 
     await clickEnrollAndWait(page)
-    await expect(page.getByRole('alert').getByText(/Enrolled 2/)).toBeVisible()
+    await expect(page.getByRole('alert').filter({ hasText: /Enrolled 2/ })).toBeVisible()
   })
 
   test('in-file duplicates are deduplicated', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
-    await expect(page.getByText(/candidates/)).toBeVisible()
+    await expect(page.getByText(/candidates/, { exact: false })).toBeVisible()
 
     await openUploadModal(page)
     await uploadCsvFile(page, 'duplicates_in_file.csv')
@@ -188,7 +198,7 @@ test.describe('CSV Enrollment — Error Handling', () => {
     await uploadCsvFile(page, 'no_email_column.csv')
 
     // Error banner
-    const alert = page.getByRole('alert')
+    const alert = page.getByRole('dialog').getByRole('alert')
     await expect(alert).toBeVisible()
     await expect(alert.getByText(/Could not find an "email" column/)).toBeVisible()
     await expect(alert.getByText(/name, phone, company/)).toBeVisible()
@@ -203,7 +213,7 @@ test.describe('CSV Enrollment — Error Handling', () => {
     await openUploadModal(page)
     await uploadCsvFile(page, 'empty.csv')
 
-    const alert = page.getByRole('alert')
+    const alert = page.getByRole('dialog').getByRole('alert')
     await expect(alert).toBeVisible()
     await expect(alert.getByText(/No valid rows found/)).toBeVisible()
   })
@@ -217,7 +227,7 @@ test.describe('CSV Enrollment — Error Handling', () => {
     await page.getByText('Try Another File').click()
 
     // Error should clear, drop zone should reappear
-    await expect(page.getByRole('alert')).not.toBeVisible()
+    await expect(page.getByRole('dialog').getByRole('alert')).not.toBeVisible()
     await expect(page.getByText('Drag & drop a CSV file here')).toBeVisible()
   })
 
@@ -245,6 +255,21 @@ test.describe('CSV Enrollment — Error Handling', () => {
     // Close and resume for other tests
     await page.getByRole('button', { name: /Close dialog/ }).click()
     await page.getByRole('button', { name: 'Resume' }).click()
+  })
+
+  test('non-CSV file shows parse error', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+
+    await openUploadModal(page)
+
+    // Upload a non-CSV file (use the playwright config as a stand-in)
+    const fileInput = page.locator('input[type="file"][accept=".csv"]')
+    await fileInput.setInputFiles(path.resolve(__dirname, '../playwright.config.ts'))
+
+    // Should show either a parse error or no valid rows
+    const dialog = page.getByRole('dialog')
+    const alert = dialog.getByRole('alert')
+    await expect(alert).toBeVisible({ timeout: 5_000 })
   })
 })
 
@@ -288,7 +313,7 @@ test.describe('CSV Enrollment — Modal UX', () => {
     await uploadCsvFile(page, 'good_candidates.csv')
 
     // Preview visible
-    await expect(page.getByText('jane@stripe.com')).toBeVisible()
+    await expect(page.getByRole('dialog').getByText('jane@stripe.com')).toBeVisible()
 
     // Click Cancel
     await page.getByRole('button', { name: 'Cancel' }).click()
@@ -296,6 +321,31 @@ test.describe('CSV Enrollment — Modal UX', () => {
     // Drop zone should reappear, modal still open
     await expect(page.getByText('Drag & drop a CSV file here')).toBeVisible()
     await expect(page.getByRole('dialog')).toBeVisible()
+  })
+
+  test('drag and drop upload works', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+    await openUploadModal(page)
+
+    // Playwright's setInputFiles simulates the file selection,
+    // but for true drag-and-drop we dispatch dataTransfer events.
+    const filePath = path.join(TEST_DATA, 'good_candidates.csv')
+
+    // Read the file and create a DataTransfer-based drop
+    const dataTransfer = await page.evaluateHandle(async (csvContent: string) => {
+      const dt = new DataTransfer()
+      const file = new File([csvContent], 'good_candidates.csv', { type: 'text/csv' })
+      dt.items.add(file)
+      return dt
+    }, await import('fs').then(fs => fs.readFileSync(filePath, 'utf-8')))
+
+    const dropZone = page.getByText('Drag & drop a CSV file here')
+    await dropZone.dispatchEvent('drop', { dataTransfer })
+
+    // Preview should appear
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('jane@stripe.com')).toBeVisible()
+    await expect(dialog.getByText(/Parsed.*5.*candidates/)).toBeVisible()
   })
 })
 
@@ -317,28 +367,16 @@ test.describe('CSV Enrollment — Status Filter', () => {
   test.beforeAll(async ({ browser }) => {
     const page = await browser.newPage()
     seqId = await createAndActivateSequence(page, `E2E Filter ${Date.now()}`)
-
-    // Enroll via API (faster and more reliable than UI in beforeAll)
-    await page.request.post(`/api/sequences/${seqId}/enroll`, {
-      data: {
-        candidates: [
-          { email: 'f1@test.com', first_name: 'One' },
-          { email: 'f2@test.com', first_name: 'Two' },
-          { email: 'f3@test.com', first_name: 'Three' },
-          { email: 'f4@test.com', first_name: 'Four' },
-          { email: 'f5@test.com', first_name: 'Five' },
-        ],
-      },
-    })
+    await enrollViaApi(page, seqId, ['f1@test.com', 'f2@test.com', 'f3@test.com', 'f4@test.com', 'f5@test.com'])
     await page.close()
   })
 
   test('filter by Active shows all enrolled candidates', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
-    await expect(page.getByText('5 candidates')).toBeVisible()
+    await expect(page.getByText('5 candidates', { exact: true })).toBeVisible()
 
     await page.getByLabel('Filter by status').selectOption('active')
-    await expect(page.getByText('5 candidates')).toBeVisible()
+    await expect(page.getByText('5 candidates', { exact: true })).toBeVisible()
   })
 
   test('filter by Replied shows zero candidates', async ({ page }) => {
@@ -355,7 +393,42 @@ test.describe('CSV Enrollment — Status Filter', () => {
     await expect(page.getByText('0 candidates')).toBeVisible()
 
     await page.getByLabel('Filter by status').selectOption('all')
-    await expect(page.getByText('5 candidates')).toBeVisible()
+    await expect(page.getByText('5 candidates', { exact: true })).toBeVisible()
+  })
+})
+
+test.describe('CSV Enrollment — Pause/Resume with Candidates', () => {
+  let seqId: string
+
+  test.beforeAll(async ({ browser }) => {
+    const page = await browser.newPage()
+    seqId = await createAndActivateSequence(page, `E2E PauseResume ${Date.now()}`)
+    await enrollViaApi(page, seqId, ['pr1@test.com', 'pr2@test.com', 'pr3@test.com'])
+    await page.close()
+  })
+
+  test('pause keeps candidates visible, resume restores upload ability', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+    await expect(page.getByText('3 candidates', { exact: true })).toBeVisible()
+
+    // Pause
+    await page.getByRole('button', { name: 'Pause' }).click()
+    // Status badge (not the filter option) shows "Paused"
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()
+
+    // Candidates still visible
+    await expect(page.getByText('3 candidates', { exact: true })).toBeVisible()
+
+    // Upload CSV button still present on paused sequence
+    await expect(page.getByRole('button', { name: 'Upload CSV' }).first()).toBeVisible()
+
+    // Resume
+    await page.getByRole('button', { name: 'Resume' }).click()
+    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible()
+
+    // Candidates still shown, upload still works
+    await expect(page.getByText('3 candidates', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Upload CSV' }).first()).toBeVisible()
   })
 })
 
@@ -365,19 +438,7 @@ test.describe('CSV Enrollment — Analytics', () => {
   test.beforeAll(async ({ browser }) => {
     const page = await browser.newPage()
     seqId = await createAndActivateSequence(page, `E2E Analytics ${Date.now()}`)
-
-    // Enroll via API
-    await page.request.post(`/api/sequences/${seqId}/enroll`, {
-      data: {
-        candidates: [
-          { email: 'a1@test.com', first_name: 'A1' },
-          { email: 'a2@test.com', first_name: 'A2' },
-          { email: 'a3@test.com', first_name: 'A3' },
-          { email: 'a4@test.com', first_name: 'A4' },
-          { email: 'a5@test.com', first_name: 'A5' },
-        ],
-      },
-    })
+    await enrollViaApi(page, seqId, ['a1@test.com', 'a2@test.com', 'a3@test.com', 'a4@test.com', 'a5@test.com'])
     await page.close()
   })
 
