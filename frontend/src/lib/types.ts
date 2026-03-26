@@ -1,6 +1,12 @@
 /** Matches `app.models.enums.SequenceStatus` JSON values. */
 export type SequenceStatus = 'draft' | 'active' | 'paused' | 'archived'
 
+/** Matches `app.models.enums.EnrollmentStatus` JSON values. */
+export type EnrollmentStatus = 'active' | 'replied' | 'completed' | 'bounced' | 'opted_out' | 'paused'
+
+/** Matches `app.models.enums.Sentiment` JSON values. */
+export type Sentiment = 'interested' | 'not_interested' | 'referral' | 'neutral'
+
 export interface SequenceStep {
   id: string
   step_order: number
@@ -79,8 +85,8 @@ export interface EnrollmentListItem {
   candidate_email: string
   current_step: number
   total_steps: number
-  status: 'active' | 'replied' | 'completed' | 'bounced' | 'opted_out' | 'paused'
-  sentiment: 'interested' | 'not_interested' | 'referral' | 'neutral' | null
+  status: EnrollmentStatus
+  sentiment: Sentiment | null
   created_at: string
 }
 

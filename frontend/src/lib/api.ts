@@ -1,6 +1,7 @@
 import type {
   ApiError,
   CandidateInput,
+  EnrollmentStatus,
   EnrollResponse,
   PaginatedEnrollments,
   Sequence,
@@ -78,9 +79,9 @@ export const api = {
       })
     },
 
-    list(sequenceId: string, status?: string, limit = 50, offset = 0): Promise<PaginatedEnrollments> {
+    list(sequenceId: string, status?: EnrollmentStatus, limit = 50, offset = 0): Promise<PaginatedEnrollments> {
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
-      if (status && status !== 'all') params.set('status', status)
+      if (status) params.set('status', status)
       return apiFetch<PaginatedEnrollments>(`/sequences/${sequenceId}/enrollments?${params}`)
     },
 
