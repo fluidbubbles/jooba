@@ -21,6 +21,10 @@ Architecture source: `docs/architecture/architecture.md`.
 - Domain exceptions originate in services and are translated to HTTP in API handlers.
 - Async task dispatch from services should go through a dispatcher interface.
 
+## Exceptions
+
+- Domain exceptions live in `services/exceptions.py`. All layers (services, repos, API handlers) may import from this module.
+
 ## Evolution note
 
 - `architecture.md` describes the target app structure across plans; if a folder is not present yet, follow these boundaries as new code is added.

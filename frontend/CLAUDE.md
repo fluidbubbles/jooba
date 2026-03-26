@@ -21,3 +21,6 @@ npm run lint
 - Keep `EmptyState` usage aligned with the shared component contract.
 - In `src/App.tsx`, replace temporary placeholder routes with real page components (avoid duplicate route paths).
 - Keep TS strictness clean (`noUnusedLocals`, `noUnusedParameters`).
+- All API response types live in `src/lib/types.ts` — single source for frontend/backend contract alignment.
+- Use `ApiRequestError` from `src/lib/api.ts` for typed error handling in catch blocks.
+- Always add `console.error` as the first line in every catch block before setting UI error state.

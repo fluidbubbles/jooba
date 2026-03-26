@@ -1,7 +1,13 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+from app.models.enums import EnrollmentStatus, Sentiment
+
+
+class _OrmSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CandidateInput(BaseModel):
@@ -13,6 +19,8 @@ class CandidateInput(BaseModel):
 
 
 class EnrollRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     candidates: list[CandidateInput] = Field(..., min_length=1)
 
 
@@ -22,17 +30,15 @@ class EnrollResponse(BaseModel):
     total: int
 
 
-class EnrollmentListItem(BaseModel):
+class EnrollmentListItem(_OrmSchema):
     id: UUID
     candidate_name: str
     candidate_email: str
     current_step: int
     total_steps: int
-    status: str
-    sentiment: str | None
+    status: EnrollmentStatus
+    sentiment: Sentiment | None
     created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class PaginatedEnrollments(BaseModel):
