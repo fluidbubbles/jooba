@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.integrations.email_sender import get_email_sender
 from app.models.candidate import Candidate
 from app.models.enums import EmailDirection, EnrollmentStatus
+from app.models.enrollment import Enrollment
 from app.models.sequence import SequenceStep
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.email_event_repo import EmailEventRepository
