@@ -53,13 +53,17 @@ class OpenAIClient:
         except APIError as exc:
             raise TransientError(f"OpenAI API error: {exc}") from exc
 
-        content = response.choices[0].message.content.strip()
+        raw_content = response.choices[0].message.content
+        if raw_content is None:
+            logger.warning("OpenAI returned empty content for classification")
+            return ClassificationResult(sentiment="neutral", reasoning="Empty response from classifier")
+        content = raw_content.strip()
         try:
             parsed = json.loads(content)
             return ClassificationResult(
                 sentiment=parsed["sentiment"].lower(),
                 reasoning=parsed.get("reasoning", ""),
             )
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError, AttributeError, TypeError):
             logger.warning("Failed to parse classification response: %s", content)
             return ClassificationResult(sentiment="neutral", reasoning="Classification parse error")

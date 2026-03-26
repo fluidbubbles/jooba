@@ -26,10 +26,10 @@ class MockClassifier(Classifier):
 
     def classify(self, reply_text: str) -> ClassificationResult:
         text = reply_text.lower()
-        if any(w in text for w in ["interested", "love to", "let's chat", "schedule", "call"]):
-            return ClassificationResult("interested", "Mock: detected interest keywords")
         if any(w in text for w in ["not interested", "no thanks", "happy where", "not looking"]):
             return ClassificationResult("not_interested", "Mock: detected decline keywords")
+        if any(w in text for w in ["interested", "love to", "let's chat", "schedule", "call"]):
+            return ClassificationResult("interested", "Mock: detected interest keywords")
         if any(w in text for w in ["talk to", "refer", "colleague", "contact"]):
             return ClassificationResult("referral", "Mock: detected referral keywords")
         return ClassificationResult("neutral", "Mock: no strong signal detected")
