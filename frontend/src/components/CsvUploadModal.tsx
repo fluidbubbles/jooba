@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Upload, X } from 'lucide-react'
 import Papa from 'papaparse'
 import { api, ApiRequestError } from '../lib/api'
@@ -9,8 +9,6 @@ interface Props {
   onClose: () => void
   onEnrolled: (result: EnrollResponse) => void
 }
-
-type ParsedRow = CandidateInput & { _error?: string }
 
 const ALIAS_MAP: Record<string, string[]> = {
   email: ['email', 'e-mail', 'email_address', 'emailaddress'],
@@ -28,8 +26,8 @@ function findColumn(row: Record<string, string>, fields: string[], aliases: stri
   return null
 }
 
-export function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
-  const [candidates, setCandidates] = useState<ParsedRow[]>([])
+export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
+  const [candidates, setCandidates] = useState<CandidateInput[]>([])
   const [fileName, setFileName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [enrolling, setEnrolling] = useState(false)
@@ -56,7 +54,7 @@ export function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
           return
         }
 
-        const rows: ParsedRow[] = []
+        const rows: CandidateInput[] = []
         for (const row of results.data as Record<string, string>[]) {
           const email = row[emailCol]?.trim()
           if (!email) continue
@@ -92,7 +90,7 @@ export function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
     [parseFile],
   )
 
-  const handleEnroll = async () => {
+  async function handleEnroll() {
     setEnrolling(true)
     setError(null)
     try {
@@ -105,7 +103,15 @@ export function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
     }
   }
 
-  const reset = () => {
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  function reset() {
     setCandidates([])
     setFileName('')
     setError(null)
@@ -113,24 +119,31 @@ export function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
-        {/* Header */}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Enroll candidates from CSV"
+        className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl"
+      >
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-gray-900">Enroll Candidates</h2>
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close dialog"
             className="text-gray-400 transition-colors hover:text-gray-600"
           >
-            <X size={20} />
+            <X size={20} aria-hidden />
           </button>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {error && (
-            <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3">
+            <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-500" />
               <div>
                 <p className="text-sm text-red-800">{error}</p>
@@ -214,7 +227,6 @@ export function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Props) {
           )}
         </div>
 
-        {/* Footer */}
         {candidates.length > 0 && (
           <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-6 py-4">
             <button
