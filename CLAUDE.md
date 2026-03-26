@@ -83,6 +83,7 @@ Use these defaults unless the user explicitly overrides. These rules apply to al
 - **Testing rule:** API integration tests must run with an isolated DB dependency override/fixture; service tests should assert behaviors and exception paths, not only constants.
 - **Regression test rule:** When a bug or issue is identified, add a regression test that reproduces the failure. Then have subagents try to fix the bug and prove it with a passing test.
 - **No inline imports:** All imports must be at the top of the file. Never use inline/local imports inside functions or methods.
+- **No `from __future__ import annotations`:** The project targets Python 3.13+. PEP 604 unions (`X | Y`) and forward references work natively. Do not add `from __future__ import annotations`.
 
 ## Package-level CLAUDE.md policy
 
