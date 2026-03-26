@@ -25,13 +25,16 @@ class NylasClient:
             api_key=settings.nylas_api_key,
         )
 
-    def get_auth_url(self) -> str:
+    def get_auth_url(self, state: str | None = None) -> str:
         """Generate Nylas OAuth URL for email account connection."""
         try:
-            return self.client.auth.url_for_oauth2({
+            payload = {
                 "client_id": settings.nylas_client_id,
                 "redirect_uri": settings.nylas_callback_url,
-            })
+            }
+            if state:
+                payload["state"] = state
+            return self.client.auth.url_for_oauth2(payload)
         except Exception as exc:
             self._raise_domain_error(exc, operation="get auth url")
 
@@ -45,9 +48,11 @@ class NylasClient:
             })
         except Exception as exc:
             self._raise_domain_error(exc, operation="exchange oauth code")
+        provider = getattr(response, "provider", None) or "unknown"
         return {
             "grant_id": response.grant_id,
             "email": response.email,
+            "provider": provider,
         }
 
     def send_email(
@@ -57,6 +62,7 @@ class NylasClient:
         subject: str,
         body_html: str,
         reply_to_message_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> SendResult:
         """Send an email through the connected account."""
         body: dict[str, object] = {
@@ -68,7 +74,14 @@ class NylasClient:
             body["reply_to_message_id"] = reply_to_message_id
 
         try:
-            response = self.client.messages.send(grant_id, request_body=body)
+            overrides: dict[str, object] | None = None
+            if idempotency_key:
+                overrides = {"headers": {"Idempotency-Key": idempotency_key}}
+            response = self.client.messages.send(
+                grant_id,
+                request_body=body,
+                overrides=overrides,
+            )
             msg = response.data
             return SendResult(
                 message_id=msg.id,
@@ -78,12 +91,23 @@ class NylasClient:
             self._raise_domain_error(exc, operation="send email")
 
     def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
-        """Verify Nylas webhook signature using the webhook-specific secret."""
-        if not settings.nylas_webhook_secret:
-            logger.error("verify_webhook_signature called with empty nylas_webhook_secret — rejecting")
+        """Verify Nylas webhook signature.
+
+        Prefer `nylas_webhook_secret`, but fall back to `nylas_api_key` for
+        setups that use the API key as webhook signing secret.
+        """
+        secret = settings.nylas_webhook_secret or settings.nylas_api_key
+        if not secret:
+            logger.error(
+                "verify_webhook_signature called without webhook secret/api key - rejecting"
+            )
             return False
+        if not settings.nylas_webhook_secret:
+            logger.warning(
+                "nylas_webhook_secret not set; falling back to nylas_api_key for webhook verification"
+            )
         expected = hmac.new(
-            settings.nylas_webhook_secret.encode(),
+            secret.encode(),
             raw_body,
             hashlib.sha256,
         ).hexdigest()
@@ -106,11 +130,10 @@ class NylasClient:
         if isinstance(error, NylasApiError):
             self._raise_if_rate_limited_or_auth_error(error, operation)
             sc = error.status_code
-            if isinstance(sc, int):
-                if 400 <= sc < 500:
-                    raise PermanentError(f"Nylas {operation} client error: {error}") from error
-                if 500 <= sc < 600:
-                    raise TransientError(f"Nylas {operation} provider error: {error}") from error
+            if isinstance(sc, int) and 400 <= sc < 500:
+                raise PermanentError(f"Nylas {operation} client error: {error}") from error
+            if isinstance(sc, int) and 500 <= sc < 600:
+                raise TransientError(f"Nylas {operation} provider error: {error}") from error
             raise TransientError(f"Nylas {operation} error: {error}") from error
 
         raise TransientError(f"Nylas {operation} error: {error}") from error

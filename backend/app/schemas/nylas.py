@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -12,3 +13,7 @@ class NylasConnectionStatus(BaseModel):
 
 class NylasAuthUrl(BaseModel):
     url: str
+
+
+class NylasDisconnectResponse(BaseModel):
+    status: Literal["disconnected"] = "disconnected"

@@ -157,7 +157,21 @@ class TestNylasWebhookVerification:
 
         assert client.verify_webhook_signature(raw_body, signature) is True
 
+    def test_verify_webhook_signature_falls_back_to_api_key(self, monkeypatch):
+        monkeypatch.setattr(settings, "nylas_webhook_secret", "")
+        monkeypatch.setattr(settings, "nylas_api_key", "api-key-secret")
+        client = NylasClient()
+        raw_body = b'{"event":"message.created"}'
+        signature = hmac.new(
+            b"api-key-secret",
+            raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+
+        assert client.verify_webhook_signature(raw_body, signature) is True
+
     def test_verify_webhook_signature_rejects_empty_secret(self, monkeypatch):
         monkeypatch.setattr(settings, "nylas_webhook_secret", "")
+        monkeypatch.setattr(settings, "nylas_api_key", "")
         client = NylasClient()
         assert client.verify_webhook_signature(b"{}", "abc") is False

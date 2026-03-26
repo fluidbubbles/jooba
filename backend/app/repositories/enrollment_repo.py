@@ -108,6 +108,12 @@ class EnrollmentRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id_for_update(self, enrollment_id: UUID) -> Enrollment | None:
+        result = await self._db.execute(
+            select(Enrollment).where(Enrollment.id == enrollment_id).with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_candidate_and_sequence(
         self, candidate_id: UUID, sequence_id: UUID
     ) -> Enrollment | None:
@@ -118,6 +124,33 @@ class EnrollmentRepository:
                     Enrollment.sequence_id == sequence_id,
                 )
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_candidate_and_sequence_for_update(
+        self, candidate_id: UUID, sequence_id: UUID
+    ) -> Enrollment | None:
+        result = await self._db.execute(
+            select(Enrollment)
+            .where(
+                and_(
+                    Enrollment.candidate_id == candidate_id,
+                    Enrollment.sequence_id == sequence_id,
+                )
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def get_latest_outbound_message_id(self, enrollment_id: UUID) -> str | None:
+        result = await self._db.execute(
+            select(EmailEvent.nylas_message_id)
+            .where(
+                EmailEvent.enrollment_id == enrollment_id,
+                EmailEvent.direction == EmailDirection.OUTBOUND.value,
+            )
+            .order_by(EmailEvent.created_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -182,6 +215,12 @@ class EnrollmentRepository:
             stmt = stmt.where(Enrollment.status == status_filter.value)
         result = await self._db.execute(stmt)
         return result.scalar_one()
+
+    async def list_active_ids(self) -> list[UUID]:
+        result = await self._db.execute(
+            select(Enrollment.id).where(Enrollment.status == EnrollmentStatus.ACTIVE.value)
+        )
+        return list(result.scalars().all())
 
     async def get_analytics(self, sequence_id: UUID) -> dict[str, int]:
         """Return aggregated analytics for a sequence."""

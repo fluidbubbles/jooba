@@ -37,9 +37,9 @@ UNSUBSCRIBE_ERROR_HTML = """<!DOCTYPE html>
 @router.get("/unsubscribe/{token}", response_class=HTMLResponse)
 async def unsubscribe(token: str, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
     try:
-        service = EnrollmentService(db)
-        success = await service.opt_out(token)
+        success = await EnrollmentService(db).opt_out(token)
     except Exception:
+        await db.rollback()
         logger.exception("Unsubscribe failed for token=%s", token[:16])
         return HTMLResponse(UNSUBSCRIBE_ERROR_HTML, status_code=500)
     if success:

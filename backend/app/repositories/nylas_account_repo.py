@@ -13,7 +13,14 @@ class NylasAccountRepository:
         result = await self._db.execute(select(NylasAccount).limit(1))
         return result.scalar_one_or_none()
 
-    async def create(self, grant_id: str, email: str, provider: str = "unknown") -> NylasAccount:
+    async def replace_single_account(
+        self,
+        grant_id: str,
+        email: str,
+        provider: str = "unknown",
+    ) -> NylasAccount:
+        """Replace the single connected account."""
+        await self._db.execute(delete(NylasAccount))
         account = NylasAccount(grant_id=grant_id, email=email, provider=provider)
         self._db.add(account)
         await self._db.flush()

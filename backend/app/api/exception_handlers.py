@@ -8,6 +8,7 @@ from app.services.exceptions import (
     InvalidStateTransition,
     ProviderRateLimited,
     SequenceNotFound,
+    TransientError,
 )
 
 
@@ -53,6 +54,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         _request: Request, exc: ProviderRateLimited
     ) -> JSONResponse:
         return _domain_error_response(exc, 503, headers={"Retry-After": str(exc.retry_after)})
+
+    @app.exception_handler(TransientError)
+    async def transient_error(
+        _request: Request, exc: TransientError
+    ) -> JSONResponse:
+        return _domain_error_response(exc, 503)
 
     @app.exception_handler(DomainError)
     async def domain_error(_request: Request, exc: DomainError) -> JSONResponse:

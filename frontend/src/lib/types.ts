@@ -102,6 +102,14 @@ export interface NylasConnection {
   connected_at: string | null
 }
 
+export interface NylasAuthUrlResponse {
+  url: string
+}
+
+export interface NylasDisconnectResponse {
+  status: 'disconnected'
+}
+
 export interface SequenceAnalytics {
   enrolled: number
   sent: number

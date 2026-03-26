@@ -1,9 +1,9 @@
 import logging
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.email_sender import EmailSender, get_email_sender
@@ -141,6 +141,16 @@ class EnrollmentService:
         """Restore a claimed enrollment to immediate eligibility after dispatch failure."""
         await self._enrollment_repo.requeue_claimed_enrollment(enrollment_id)
 
+    async def _pause_for_integrity(
+        self,
+        enrollment_id: UUID,
+        trigger: str,
+        message: str,
+        *message_args: object,
+    ) -> None:
+        logger.error(message, *message_args)
+        await self.mark_paused(enrollment_id, trigger=trigger)
+
     async def send_email_for_enrollment(self, enrollment_id: UUID) -> None:
         """Entry point for the send task. Resolves sender + account, then delegates."""
         account = await self._nylas_repo.get_first()
@@ -152,37 +162,84 @@ class EnrollmentService:
 
     async def _advance_step(self, enrollment_id: UUID, sender: EmailSender, grant_id: str) -> None:
         """Send the current step's email, record the event, and advance to the next step or complete."""
-        enrollment = await self._enrollment_repo.get_by_id(enrollment_id)
+        enrollment = await self._enrollment_repo.get_by_id_for_update(enrollment_id)
         if not enrollment:
-            logger.error("Enrollment %s not found during advance_step", enrollment_id)
+            logger.error(
+                "Enrollment %s not found during advance_step",
+                enrollment_id,
+            )
             return
 
         if enrollment.status != EnrollmentStatus.ACTIVE.value:
-            logger.debug("Skipping advance_step for enrollment %s — status=%s", enrollment_id, enrollment.status)
+            logger.debug(
+                "Skipping advance_step for enrollment %s - status=%s",
+                enrollment_id,
+                enrollment.status,
+            )
             return
 
-        sequence = await self._sequence_repo.get_by_id(enrollment.sequence_id)
+        if enrollment.next_send_at is not None:
+            logger.debug(
+                "Skipping advance_step for enrollment %s - not currently claimed",
+                enrollment_id,
+            )
+            return
+
+        sequence = await self._sequence_repo.get_by_id_for_update(enrollment.sequence_id)
         if not sequence or not sequence.steps:
-            logger.error("Sequence %s missing or has no steps for enrollment %s", enrollment.sequence_id, enrollment_id)
+            await self._pause_for_integrity(
+                enrollment_id,
+                "integrity_sequence_missing",
+                "Sequence %s missing or has no steps for enrollment %s",
+                enrollment.sequence_id,
+                enrollment_id,
+            )
+            return
+
+        if sequence.status != SequenceStatus.ACTIVE.value:
+            await self._pause_for_integrity(
+                enrollment_id,
+                "integrity_sequence_inactive",
+                "Sequence %s is %s for enrollment %s",
+                enrollment.sequence_id,
+                sequence.status,
+                enrollment_id,
+            )
             return
 
         step_index = enrollment.current_step
         if step_index >= len(sequence.steps):
-            logger.error("Step index %d out of range for enrollment %s (sequence has %d steps)", step_index, enrollment_id, len(sequence.steps))
+            await self._pause_for_integrity(
+                enrollment_id,
+                "integrity_step_index_out_of_range",
+                "Step index %d out of range for enrollment %s (sequence has %d steps)",
+                step_index,
+                enrollment_id,
+                len(sequence.steps),
+            )
             return
 
         step = sequence.steps[step_index]
 
         candidate = await self._candidate_repo.get_by_id(enrollment.candidate_id)
         if not candidate:
-            logger.error("Candidate %s not found for enrollment %s", enrollment.candidate_id, enrollment_id)
+            await self._pause_for_integrity(
+                enrollment_id,
+                "integrity_candidate_missing",
+                "Candidate %s not found for enrollment %s",
+                enrollment.candidate_id,
+                enrollment_id,
+            )
             return
 
         composed = EmailService.compose(step, candidate, enrollment.unsubscribe_token)
 
-        reply_to_id = None
-        if step_index > 0:
-            reply_to_id = await self._get_last_outbound_message_id(enrollment_id)
+        reply_to_id = (
+            await self._enrollment_repo.get_latest_outbound_message_id(enrollment_id)
+            if step_index > 0
+            else None
+        )
+        idempotency_key = f"{enrollment_id}:{step_index}"
 
         result = sender.send(
             grant_id=grant_id,
@@ -190,6 +247,7 @@ class EnrollmentService:
             subject=composed["subject"],
             body_html=composed["body_html"],
             reply_to_message_id=reply_to_id,
+            idempotency_key=idempotency_key,
         )
 
         event = EmailEvent(
@@ -210,40 +268,32 @@ class EnrollmentService:
             enrollment.next_send_at = datetime.now(timezone.utc) + timedelta(
                 minutes=next_step.delay_minutes
             )
-            trigger = "email_sent"
+            await self._enrollment_repo.log_transition(
+                enrollment_id=enrollment_id,
+                from_status=EnrollmentStatus.ACTIVE,
+                to_status=EnrollmentStatus.ACTIVE,
+                trigger="email_sent",
+            )
         else:
             enrollment.status = EnrollmentStatus.COMPLETED.value
             enrollment.next_send_at = None
             enrollment.completed_at = datetime.now(timezone.utc)
-            trigger = "completed"
+            await self._enrollment_repo.log_transition(
+                enrollment_id=enrollment_id,
+                from_status=EnrollmentStatus.ACTIVE,
+                to_status=EnrollmentStatus.COMPLETED,
+                trigger="completed",
+            )
 
         await self._db.flush()
 
-        await self._enrollment_repo.log_transition(
-            enrollment_id=enrollment_id,
-            from_status=EnrollmentStatus.ACTIVE,
-            to_status=EnrollmentStatus(enrollment.status),
-            trigger=trigger,
-        )
-
-    async def _get_last_outbound_message_id(self, enrollment_id: UUID) -> str | None:
-        """Get the last outbound email's Nylas message ID for threading."""
-        result = await self._db.execute(
-            select(EmailEvent.nylas_message_id)
-            .where(
-                EmailEvent.enrollment_id == enrollment_id,
-                EmailEvent.direction == EmailDirection.OUTBOUND.value,
-            )
-            .order_by(EmailEvent.created_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
-    async def mark_paused(self, enrollment_id: UUID) -> None:
+    async def mark_paused(
+        self, enrollment_id: UUID, trigger: str = "max_retries_exhausted"
+    ) -> bool:
         """Pause an enrollment (transient failures after max retries)."""
         enrollment = await self._enrollment_repo.get_by_id(enrollment_id)
         if not enrollment or enrollment.status != EnrollmentStatus.ACTIVE.value:
-            return
+            return False
         enrollment.status = EnrollmentStatus.PAUSED.value
         enrollment.next_send_at = None
         await self._db.flush()
@@ -251,8 +301,18 @@ class EnrollmentService:
             enrollment_id=enrollment_id,
             from_status=EnrollmentStatus.ACTIVE,
             to_status=EnrollmentStatus.PAUSED,
-            trigger="max_retries_exhausted",
+            trigger=trigger,
         )
+        return True
+
+    async def mark_all_active_paused(self, trigger: str) -> int:
+        """Pause all active enrollments (single-account auth failure handling)."""
+        paused_count = 0
+        active_ids = await self._enrollment_repo.list_active_ids()
+        for active_id in active_ids:
+            if await self.mark_paused(active_id, trigger=trigger):
+                paused_count += 1
+        return paused_count
 
     async def opt_out(self, token: str) -> bool:
         """Mark enrollment as opted-out via unsubscribe token.
@@ -267,28 +327,38 @@ class EnrollmentService:
             return False
 
         candidate_id, sequence_id = parsed
-        enrollment = await self._enrollment_repo.get_by_candidate_and_sequence(
+        enrollment = await self._enrollment_repo.get_by_candidate_and_sequence_for_update(
             candidate_id, sequence_id
         )
         if not enrollment:
             return False
 
-        # BOUNCED is treated as equivalent: email is undeliverable, so unsubscribing
-        # is already satisfied — acknowledge success without re-transitioning.
+        if not enrollment.unsubscribe_token:
+            return False
+        if not hmac.compare_digest(enrollment.unsubscribe_token, token):
+            return False
+
         if enrollment.status in (
             EnrollmentStatus.OPTED_OUT.value,
             EnrollmentStatus.BOUNCED.value,
+            EnrollmentStatus.REPLIED.value,
+            EnrollmentStatus.COMPLETED.value,
         ):
             return True
 
-        old_status = enrollment.status
+        if enrollment.status not in (
+            EnrollmentStatus.ACTIVE.value,
+            EnrollmentStatus.PAUSED.value,
+        ):
+            return False
+
+        old_status = EnrollmentStatus(enrollment.status)
         enrollment.status = EnrollmentStatus.OPTED_OUT.value
         enrollment.next_send_at = None
-        await self._db.flush()
 
         await self._enrollment_repo.log_transition(
             enrollment_id=enrollment.id,
-            from_status=EnrollmentStatus(old_status),
+            from_status=old_status,
             to_status=EnrollmentStatus.OPTED_OUT,
             trigger="unsubscribe_clicked",
         )

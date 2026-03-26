@@ -51,6 +51,7 @@ async def _dispatch_send_or_requeue(
                 "Failed to requeue claimed enrollment %s after dispatch failure",
                 enrollment_id,
             )
+            raise
 
 
 async def _requeue_claimed_enrollment(enrollment_id: UUID) -> None:

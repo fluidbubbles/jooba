@@ -19,11 +19,48 @@ def _transient_backoff_seconds(retries: int) -> int:
     return TRANSIENT_BACKOFFS[min(retries, len(TRANSIENT_BACKOFFS) - 1)]
 
 
-def _pause_enrollment_safe(enrollment_id: str, msg: str, *msg_args: object) -> None:
+def _schedule_transient_retry(task: Task) -> None:
+    backoff = _transient_backoff_seconds(task.request.retries)
+    raise task.retry(countdown=backoff, max_retries=TRANSIENT_MAX_RETRIES)
+
+
+def _pause_single_enrollment_or_raise(
+    enrollment_id: str,
+    trigger: str,
+    msg: str,
+    *msg_args: object,
+) -> None:
     try:
-        asyncio.run(_pause_enrollment(enrollment_id))
+        asyncio.run(_pause_enrollment(enrollment_id, trigger))
+        return
     except Exception:
         logger.exception(msg, *msg_args)
+        try:
+            asyncio.run(_requeue_claimed_enrollment(enrollment_id))
+            logger.warning(
+                "Requeued enrollment %s after pause failure to avoid stranded claim",
+                enrollment_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to requeue enrollment %s after pause failure",
+                enrollment_id,
+            )
+    raise RuntimeError(f"Failed to pause enrollment {enrollment_id}")
+
+
+def _pause_all_active_enrollments_or_raise(
+    trigger: str, msg: str, *msg_args: object
+) -> None:
+    try:
+        paused_count = asyncio.run(_pause_all_active_enrollments(trigger))
+        logger.warning(
+            "Paused %d active enrollment(s) due to account-level permanent error",
+            paused_count,
+        )
+    except Exception:
+        logger.exception(msg, *msg_args)
+        raise RuntimeError("Failed to pause active enrollments")
 
 
 @celery_app.task(
@@ -45,35 +82,48 @@ def send_sequence_email(self: Task, enrollment_id: str) -> None:
         if retries >= TRANSIENT_MAX_RETRIES:
             logger.error(
                 "Transient error after %d retries, pausing enrollment %s",
-                retries, enrollment_id,
+                retries,
+                enrollment_id,
             )
-            _pause_enrollment_safe(
-                enrollment_id, "Failed to pause enrollment after max retries"
+            _pause_single_enrollment_or_raise(
+                enrollment_id,
+                "max_retries_exhausted",
+                "Failed to pause enrollment after max retries",
             )
             return
         backoff = _transient_backoff_seconds(retries)
         logger.warning(
             "Transient error, retry %d/%d in %ds: %s",
-            retries + 1, TRANSIENT_MAX_RETRIES, backoff, e,
+            retries + 1,
+            TRANSIENT_MAX_RETRIES,
+            backoff,
+            e,
         )
-        raise self.retry(countdown=backoff, max_retries=TRANSIENT_MAX_RETRIES)
+        _schedule_transient_retry(self)
     except PermanentError as e:
         logger.error("Permanent error for enrollment %s: %s", enrollment_id, e)
-        _pause_enrollment_safe(
-            enrollment_id, "Failed to pause enrollment after permanent error"
+        if "auth error" in str(e).lower():
+            _pause_all_active_enrollments_or_raise(
+                "provider_auth_revoked",
+                "Failed to pause active enrollments after provider auth error",
+            )
+            return
+        _pause_single_enrollment_or_raise(
+            enrollment_id,
+            "permanent_error",
+            "Failed to pause enrollment after permanent error",
         )
     except Exception:
         logger.exception("Unexpected error for enrollment %s", enrollment_id)
-        retries = self.request.retries
-        if retries >= TRANSIENT_MAX_RETRIES:
-            _pause_enrollment_safe(
+        if self.request.retries >= TRANSIENT_MAX_RETRIES:
+            _pause_single_enrollment_or_raise(
                 enrollment_id,
+                "unexpected_error",
                 "Failed to pause enrollment %s after unexpected error",
                 enrollment_id,
             )
             return
-        backoff = _transient_backoff_seconds(retries)
-        raise self.retry(countdown=backoff, max_retries=TRANSIENT_MAX_RETRIES)
+        _schedule_transient_retry(self)
 
 
 async def _send(enrollment_id: str) -> None:
@@ -83,8 +133,23 @@ async def _send(enrollment_id: str) -> None:
         await db.commit()
 
 
-async def _pause_enrollment(enrollment_id: str) -> None:
+async def _pause_enrollment(enrollment_id: str, trigger: str) -> None:
     async with celery_session() as db:
         service = EnrollmentService(db)
-        await service.mark_paused(UUID(enrollment_id))
+        await service.mark_paused(UUID(enrollment_id), trigger=trigger)
         await db.commit()
+
+
+async def _requeue_claimed_enrollment(enrollment_id: str) -> None:
+    async with celery_session() as db:
+        service = EnrollmentService(db)
+        await service.requeue_claimed_enrollment(UUID(enrollment_id))
+        await db.commit()
+
+
+async def _pause_all_active_enrollments(trigger: str) -> int:
+    async with celery_session() as db:
+        service = EnrollmentService(db)
+        paused_count = await service.mark_all_active_paused(trigger=trigger)
+        await db.commit()
+        return paused_count

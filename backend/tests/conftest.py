@@ -15,7 +15,7 @@ if not TEST_DATABASE_URL:
     raise RuntimeError("TEST_DATABASE_URL must be set for integration tests")
 
 # Tables listed in FK-safe order; CASCADE handles dependents automatically.
-_TRUNCATE_TABLES = "sequences, candidates"
+_TRUNCATE_TABLES = "nylas_accounts, sequences, candidates"
 
 
 def _validate_truncate_target(database_url: str) -> None:
