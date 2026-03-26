@@ -2,9 +2,12 @@ import { Mail } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import EmptyState from '../components/EmptyState'
 import StatCard from '../components/StatCard'
+import { useNylasConnection } from '../lib/nylasConnectionContext'
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { connection, loading } = useNylasConnection()
+  const isConnected = connection?.connected === true
 
   return (
     <div className="space-y-7 p-8">
@@ -17,18 +20,20 @@ export default function Dashboard() {
         <StatCard label="Interested" value={0} accent />
       </div>
 
-      <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-        <span className="text-[13px] text-amber-800">
-          ⚠ Email not connected — connect your inbox in Settings to start sending.
-        </span>
-        <button
-          type="button"
-          onClick={() => navigate('/settings')}
-          className="text-[13px] font-medium text-blue-500 hover:text-blue-600"
-        >
-          Go to Settings →
-        </button>
-      </div>
+      {!loading && !isConnected && (
+        <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <span className="text-[13px] text-amber-800">
+            ⚠ Email not connected — connect your inbox in Settings to start sending.
+          </span>
+          <button
+            type="button"
+            onClick={() => navigate('/settings')}
+            className="text-[13px] font-medium text-blue-500 hover:text-blue-600"
+          >
+            Go to Settings →
+          </button>
+        </div>
+      )}
 
       <EmptyState
         icon={Mail}
