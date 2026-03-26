@@ -31,13 +31,24 @@ class SequenceRepository:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
-    async def get_by_id(self, sequence_id: uuid.UUID) -> Sequence | None:
+    def _get_by_id_stmt(self, sequence_id: uuid.UUID, *, for_update: bool = False):
         stmt = (
             select(Sequence)
             .where(Sequence.id == sequence_id)
             .execution_options(populate_existing=True)
             .options(selectinload(Sequence.steps))
         )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return stmt
+
+    async def get_by_id(self, sequence_id: uuid.UUID) -> Sequence | None:
+        stmt = self._get_by_id_stmt(sequence_id)
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_id_for_update(self, sequence_id: uuid.UUID) -> Sequence | None:
+        stmt = self._get_by_id_stmt(sequence_id, for_update=True)
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 

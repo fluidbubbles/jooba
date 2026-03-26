@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -108,6 +108,12 @@ class EnrollmentRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id_for_update(self, enrollment_id: UUID) -> Enrollment | None:
+        result = await self._db.execute(
+            select(Enrollment).where(Enrollment.id == enrollment_id).with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_candidate_and_sequence(
         self, candidate_id: UUID, sequence_id: UUID
     ) -> Enrollment | None:
@@ -118,6 +124,33 @@ class EnrollmentRepository:
                     Enrollment.sequence_id == sequence_id,
                 )
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_candidate_and_sequence_for_update(
+        self, candidate_id: UUID, sequence_id: UUID
+    ) -> Enrollment | None:
+        result = await self._db.execute(
+            select(Enrollment)
+            .where(
+                and_(
+                    Enrollment.candidate_id == candidate_id,
+                    Enrollment.sequence_id == sequence_id,
+                )
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def get_latest_outbound_message_id(self, enrollment_id: UUID) -> str | None:
+        result = await self._db.execute(
+            select(EmailEvent.nylas_message_id)
+            .where(
+                EmailEvent.enrollment_id == enrollment_id,
+                EmailEvent.direction == EmailDirection.OUTBOUND.value,
+            )
+            .order_by(EmailEvent.created_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -183,6 +216,12 @@ class EnrollmentRepository:
         result = await self._db.execute(stmt)
         return result.scalar_one()
 
+    async def list_active_ids(self) -> list[UUID]:
+        result = await self._db.execute(
+            select(Enrollment.id).where(Enrollment.status == EnrollmentStatus.ACTIVE.value)
+        )
+        return list(result.scalars().all())
+
     async def get_analytics(self, sequence_id: UUID) -> dict[str, int]:
         """Return aggregated analytics for a sequence."""
         status_stmt = (
@@ -235,6 +274,45 @@ class EnrollmentRepository:
             "completed": status_counts.get(EnrollmentStatus.COMPLETED.value, 0),
             "paused": status_counts.get(EnrollmentStatus.PAUSED.value, 0),
         }
+
+    async def claim_due_enrollments(self, limit: int = 100) -> list[UUID]:
+        """Atomically claim enrollments due for sending.
+
+        Uses FOR UPDATE SKIP LOCKED to prevent overlapping scheduler cycles.
+        Sets next_send_at = NULL so the next cycle skips them.
+        """
+        result = await self._db.execute(
+            text("""
+                UPDATE enrollments
+                SET next_send_at = NULL, updated_at = now()
+                WHERE id IN (
+                    SELECT id FROM enrollments
+                    WHERE status = :status AND next_send_at <= now()
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT :limit
+                )
+                RETURNING id
+            """),
+            {"status": EnrollmentStatus.ACTIVE.value, "limit": limit},
+        )
+        rows = result.fetchall()
+        return [row[0] for row in rows]
+
+    async def requeue_claimed_enrollment(self, enrollment_id: UUID) -> None:
+        """Restore immediate eligibility when scheduler dispatch fails."""
+        await self._db.execute(
+            text("""
+                UPDATE enrollments
+                SET next_send_at = now(), updated_at = now()
+                WHERE id = :enrollment_id
+                  AND status = :status
+                  AND next_send_at IS NULL
+            """),
+            {
+                "enrollment_id": enrollment_id,
+                "status": EnrollmentStatus.ACTIVE.value,
+            },
+        )
 
     async def log_transition(
         self,

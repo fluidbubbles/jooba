@@ -37,7 +37,10 @@ VALID_TRANSITIONS: dict[EnrollmentStatus, list[EnrollmentStatus]] = {
         EnrollmentStatus.OPTED_OUT,
         EnrollmentStatus.PAUSED,
     ],
-    EnrollmentStatus.PAUSED: [EnrollmentStatus.ACTIVE],
+    EnrollmentStatus.PAUSED: [
+        EnrollmentStatus.ACTIVE,
+        EnrollmentStatus.OPTED_OUT,
+    ],
     EnrollmentStatus.REPLIED: [],
     EnrollmentStatus.COMPLETED: [],
     EnrollmentStatus.BOUNCED: [],

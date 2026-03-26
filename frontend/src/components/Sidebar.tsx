@@ -1,5 +1,7 @@
 import { Inbox, LayoutDashboard, Mail, Settings } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
+
+import { useNylasConnection } from '../lib/nylasConnectionContext'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -7,6 +9,50 @@ const navItems = [
   { to: '/inbox', icon: Inbox, label: 'Inbox' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
+
+function SidebarEmailFooter() {
+  const { connection, loading, error } = useNylasConnection()
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <span className="w-2 h-2 rounded-full bg-gray-500" />
+        Checking email...
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <Link
+        to="/settings"
+        className="flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300"
+      >
+        <span className="w-2 h-2 rounded-full bg-amber-400" />
+        Email status unavailable
+      </Link>
+    )
+  }
+
+  if (connection?.connected) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-2 h-2 rounded-full bg-green-400" />
+        <span className="text-gray-400 truncate">{connection.email}</span>
+      </div>
+    )
+  }
+
+  return (
+    <Link
+      to="/settings"
+      className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300"
+    >
+      <span className="w-2 h-2 rounded-full bg-red-400" />
+      Connect Email
+    </Link>
+  )
+}
 
 export default function Sidebar() {
   return (
@@ -33,10 +79,7 @@ export default function Sidebar() {
           ))}
         </nav>
       </div>
-      <div className="flex items-center gap-2">
-        <div className="h-2 w-2 rounded-full bg-green-500" />
-        <span className="text-xs text-gray-400">dan@ramp.com</span>
-      </div>
+      <SidebarEmailFooter />
     </aside>
   )
 }

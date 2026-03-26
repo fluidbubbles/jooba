@@ -3,6 +3,9 @@ import type {
   CandidateInput,
   EnrollmentStatus,
   EnrollResponse,
+  NylasAuthUrlResponse,
+  NylasConnection,
+  NylasDisconnectResponse,
   PaginatedEnrollments,
   Sequence,
   SequenceAnalytics,
@@ -28,7 +31,8 @@ export class ApiRequestError extends Error {
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers)
-  if (!headers.has('Content-Type')) {
+  const hasBody = options?.body !== undefined && options.body !== null
+  if (hasBody && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -87,6 +91,20 @@ export const api = {
 
     analytics(sequenceId: string): Promise<SequenceAnalytics> {
       return apiFetch<SequenceAnalytics>(`/sequences/${sequenceId}/analytics`)
+    },
+  },
+
+  nylas: {
+    status(): Promise<NylasConnection> {
+      return apiFetch<NylasConnection>('/nylas/status')
+    },
+
+    authUrl(): Promise<NylasAuthUrlResponse> {
+      return apiFetch<NylasAuthUrlResponse>('/nylas/auth-url')
+    },
+
+    disconnect(): Promise<NylasDisconnectResponse> {
+      return apiFetch<NylasDisconnectResponse>('/nylas/disconnect', { method: 'DELETE' })
     },
   },
 }
