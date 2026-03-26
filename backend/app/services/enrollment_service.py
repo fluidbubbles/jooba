@@ -16,7 +16,7 @@ from app.repositories.nylas_account_repo import NylasAccountRepository
 from app.repositories.sequence_repo import SequenceRepository
 from app.schemas.enrollment import CandidateInput
 from app.services.email_service import EmailService
-from app.services.exceptions import InvalidSequenceData, PermanentError, SequenceNotFound
+from app.services.exceptions import EmailEventNotFound, InvalidSequenceData, PermanentError, SequenceNotFound
 from app.utils.unsubscribe import generate_unsubscribe_token, verify_unsubscribe_token
 
 if TYPE_CHECKING:
@@ -268,7 +268,7 @@ class EnrollmentService:
             next_step = sequence.steps[step_index + 1]
             enrollment.current_step = step_index + 1
             enrollment.next_send_at = datetime.now(timezone.utc) + timedelta(
-                minutes=next_step.delay_minutes
+                minutes=next_step.delay_minutes * 1440  # days → minutes
             )
             await self._enrollment_repo.log_transition(
                 enrollment_id=enrollment_id,
@@ -374,8 +374,7 @@ class EnrollmentService:
         """
         event = await self._event_repo.find_by_id(email_event_id)
         if not event:
-            logger.error("mark_replied_by_event: event %s not found", email_event_id)
-            return
+            raise EmailEventNotFound(email_event_id)
         await self.mark_replied(event.enrollment_id)
 
     async def mark_replied(self, enrollment_id: UUID) -> None:
