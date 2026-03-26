@@ -1,0 +1,5 @@
+email,first_name,company
+dupe@test.com,First,CompanyA
+dupe@test.com,Second,CompanyB
+DUPE@TEST.COM,Third,CompanyC
+unique@test.com,Unique,CompanyD

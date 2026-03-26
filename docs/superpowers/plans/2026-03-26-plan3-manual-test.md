@@ -7,52 +7,16 @@
 
 ## Test Data Files
 
-Save these files to your desktop before starting.
+All CSV files are pre-created in `docs/superpowers/plans/test-data/`:
 
-### `good_candidates.csv`
-```csv
-email,first_name,last_name,company,title
-jane@stripe.com,Jane,Chen,Stripe,Senior SWE
-alex@figma.com,Alex,Kumar,Figma,Staff Engineer
-sarah@netflix.com,Sarah,Park,Netflix,Principal Eng
-mike@meta.com,Mike,Johnson,Meta,Engineering Manager
-lisa@google.com,Lisa,Wang,Google,Senior SWE
-```
-
-### `weird_headers.csv`
-```csv
-E-Mail,FirstName,Last,Organization,Job_Title
-tom@airbnb.com,Tom,Lee,Airbnb,Backend Lead
-nina@uber.com,Nina,Patel,Uber,Tech Lead
-```
-
-### `no_email_column.csv`
-```csv
-name,phone,company
-John Doe,555-1234,Acme Corp
-Jane Smith,555-5678,Globex
-```
-
-### `email_only.csv`
-```csv
-email
-solo@test.com
-minimal@test.com
-```
-
-### `empty.csv`
-```csv
-email,first_name
-```
-
-### `duplicates_in_file.csv`
-```csv
-email,first_name,company
-dupe@test.com,First,CompanyA
-dupe@test.com,Second,CompanyB
-DUPE@TEST.COM,Third,CompanyC
-unique@test.com,Unique,CompanyD
-```
+| File | Purpose |
+|------|---------|
+| `good_candidates.csv` | 5 candidates with all fields populated |
+| `weird_headers.csv` | Non-standard column names (E-Mail, FirstName, Organization, Job_Title) |
+| `no_email_column.csv` | Missing email column entirely (name, phone, company) |
+| `email_only.csv` | Only an email column, no name/company/title |
+| `empty.csv` | Headers only, no data rows |
+| `duplicates_in_file.csv` | Same email repeated with different casing |
 
 ---
 
