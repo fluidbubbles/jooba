@@ -367,33 +367,91 @@ test.describe('CSV Enrollment — Status Filter', () => {
   test.beforeAll(async ({ browser }) => {
     const page = await browser.newPage()
     seqId = await createAndActivateSequence(page, `E2E Filter ${Date.now()}`)
-    await enrollViaApi(page, seqId, ['f1@test.com', 'f2@test.com', 'f3@test.com', 'f4@test.com', 'f5@test.com'])
+    await enrollViaApi(page, seqId, [
+      'filter-active1@test.com',
+      'filter-active2@test.com',
+      'filter-replied@test.com',
+      'filter-completed@test.com',
+      'filter-bounced@test.com',
+      'filter-opted-out@test.com',
+      'filter-paused@test.com',
+    ])
+
+    // Set different statuses via direct DB update so we can test all filters.
+    // No PATCH enrollment API exists yet (Plan 4), so we update via psql.
+    const { execFileSync } = await import('child_process')
+    const statusUpdates: [string, string][] = [
+      ['filter-replied@test.com', 'replied'],
+      ['filter-completed@test.com', 'completed'],
+      ['filter-bounced@test.com', 'bounced'],
+      ['filter-opted-out@test.com', 'opted_out'],
+      ['filter-paused@test.com', 'paused'],
+    ]
+
+    for (const [email, status] of statusUpdates) {
+      const sql = [
+        `UPDATE enrollments SET status = '${status}'`,
+        `WHERE candidate_id = (SELECT id FROM candidates WHERE email = '${email}')`,
+        `AND sequence_id = '${seqId}'`,
+      ].join(' ')
+      execFileSync(
+        'docker',
+        ['compose', 'exec', '-T', 'db', 'psql', '-U', 'jooba', '-d', 'jooba', '-c', sql],
+        { cwd: '/Users/admin/projects/jooba' },
+      )
+    }
+
     await page.close()
   })
 
-  test('filter by Active shows all enrolled candidates', async ({ page }) => {
+  test('filter All shows all 7 candidates', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
-    await expect(page.getByText('5 candidates', { exact: true })).toBeVisible()
+    await expect(page.getByText('7 candidates', { exact: true })).toBeVisible()
+  })
 
+  test('filter by Active shows only active candidates', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
     await page.getByLabel('Filter by status').selectOption('active')
-    await expect(page.getByText('5 candidates', { exact: true })).toBeVisible()
+    await expect(page.getByText('2 candidates', { exact: true })).toBeVisible()
   })
 
-  test('filter by Replied shows zero candidates', async ({ page }) => {
+  test('filter by Replied shows 1 candidate', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
-
     await page.getByLabel('Filter by status').selectOption('replied')
-    await expect(page.getByText('0 candidates')).toBeVisible()
+    await expect(page.getByText('1 candidate', { exact: true })).toBeVisible()
   })
 
-  test('filter by All shows everyone again', async ({ page }) => {
+  test('filter by Completed shows 1 candidate', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
+    await page.getByLabel('Filter by status').selectOption('completed')
+    await expect(page.getByText('1 candidate', { exact: true })).toBeVisible()
+  })
 
-    await page.getByLabel('Filter by status').selectOption('replied')
-    await expect(page.getByText('0 candidates')).toBeVisible()
+  test('filter by Bounced shows 1 candidate', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+    await page.getByLabel('Filter by status').selectOption('bounced')
+    await expect(page.getByText('1 candidate', { exact: true })).toBeVisible()
+  })
+
+  test('filter by Opted Out shows 1 candidate', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+    await page.getByLabel('Filter by status').selectOption('opted_out')
+    await expect(page.getByText('1 candidate', { exact: true })).toBeVisible()
+  })
+
+  test('filter by Paused shows 1 candidate', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+    await page.getByLabel('Filter by status').selectOption('paused')
+    await expect(page.getByText('1 candidate', { exact: true })).toBeVisible()
+  })
+
+  test('switching from filtered back to All restores full list', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+    await page.getByLabel('Filter by status').selectOption('bounced')
+    await expect(page.getByText('1 candidate', { exact: true })).toBeVisible()
 
     await page.getByLabel('Filter by status').selectOption('all')
-    await expect(page.getByText('5 candidates', { exact: true })).toBeVisible()
+    await expect(page.getByText('7 candidates', { exact: true })).toBeVisible()
   })
 })
 
