@@ -26,6 +26,7 @@ class ClassificationService:
 
         # Idempotency: skip if already classified
         if event.sentiment is not None:
+            logger.debug("event %s already classified, skipping", email_event_id)
             return
 
         classifier = get_classifier()
