@@ -277,6 +277,7 @@ class EnrollmentService:
                 trigger="email_sent",
             )
         else:
+            enrollment.current_step = step_index + 1
             enrollment.status = EnrollmentStatus.COMPLETED.value
             enrollment.next_send_at = None
             enrollment.completed_at = datetime.now(timezone.utc)

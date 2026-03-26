@@ -39,6 +39,8 @@ class ReplyDetail(BaseModel):
     candidate_name: str
     candidate_email: str
     sequence_name: str
+    current_step: int
+    total_steps: int
     sentiment: Sentiment | None
     sentiment_reasoning: str | None
     thread: list[ThreadEvent]

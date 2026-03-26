@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -146,3 +146,34 @@ class TestSendManualReply:
 
         with pytest.raises(PermanentError, match="No email account connected"):
             await service.send_manual_reply(uuid4(), "<p>Hi</p>")
+
+    @pytest.mark.asyncio
+    async def test_reply_subject_deduplicates_existing_re_prefixes(self):
+        service = _build_service()
+        event_id = uuid4()
+        enrollment_id = uuid4()
+        candidate_id = uuid4()
+
+        service._event_repo.find_by_id.return_value = SimpleNamespace(
+            enrollment_id=enrollment_id,
+            subject="Re: Re: Following up - Jane",
+            nylas_message_id="msg-1",
+        )
+        service._enrollment_repo.get_by_id.return_value = SimpleNamespace(
+            id=enrollment_id,
+            candidate_id=candidate_id,
+            status=EnrollmentStatus.REPLIED.value,
+            unsubscribe_token="tok",
+        )
+        service._candidate_repo.get_by_id.return_value = SimpleNamespace(email="jane@example.com")
+        service._nylas_repo.get_first.return_value = SimpleNamespace(grant_id="grant-1")
+        service._event_repo.create.return_value = SimpleNamespace(id=uuid4())
+
+        sender = MagicMock()
+        sender.send.return_value = SimpleNamespace(message_id="msg-2", thread_id="thread-1")
+
+        with patch("app.services.email_service.get_email_sender", return_value=sender):
+            await service.send_manual_reply(event_id, "<p>Hi</p>")
+
+        assert sender.send.call_args.kwargs["subject"] == "Re: Following up - Jane"
+        assert service._event_repo.create.call_args.kwargs["subject"] == "Re: Following up - Jane"

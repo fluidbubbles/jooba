@@ -22,3 +22,4 @@ Architecture source: `docs/architecture/architecture.md` (Layered Architecture +
 
 - Use `Depends()` to inject DB sessions and services.
 - In webhook endpoints, keep API concerns in API layer (signature/auth checks, payload extraction) before delegating to service methods.
+- **Nylas webhook challenge must return plain text:** The `GET /api/nylas/webhook` endpoint must return `PlainTextResponse(challenge)`, not a JSON dict. Nylas rejects JSON challenge responses silently.

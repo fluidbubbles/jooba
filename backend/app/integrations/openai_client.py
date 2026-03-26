@@ -17,9 +17,22 @@ CLASSIFY_PROMPT = """You are an AI assistant for a recruiting tool. Classify the
 - NEUTRAL: Anything else (asks a question without clear interest/disinterest, ambiguous response).
 
 Reply ONLY with valid JSON:
-{"sentiment": "interested|not_interested|referral|neutral", "reasoning": "one sentence explaining why"}
+{{"sentiment": "interested|not_interested|referral|neutral", "reasoning": "one sentence explaining why"}}
 
 Candidate's reply:
+---
+{reply_text}
+---"""
+
+EXTRACT_REFERRAL_PROMPT = """Extract the referred person's contact information from this email reply.
+The sender is referring someone else for a job opportunity.
+
+Return ONLY valid JSON:
+{{"name": "Full Name or null", "email": "email@example.com or null", "title": "Job Title or null", "company": "Company or null"}}
+
+If a field cannot be determined, use null.
+
+Email reply:
 ---
 {reply_text}
 ---"""
@@ -31,20 +44,25 @@ class ClassificationResult:
     reasoning: str
 
 
+@dataclass
+class ReferralExtraction:
+    name: str | None
+    email: str | None
+    title: str | None
+    company: str | None
+
+
 class OpenAIClient:
     def __init__(self) -> None:
         self.client = OpenAI(api_key=settings.openai_api_key)
 
-    def classify_reply(self, reply_text: str) -> ClassificationResult:
-        """Classify a candidate reply using the configured OpenAI model."""
+    def _chat_completion(self, *, user_content: str, max_tokens: int):
         try:
-            response = self.client.chat.completions.create(
+            return self.client.chat.completions.create(
                 model=settings.openai_model,
-                messages=[
-                    {"role": "user", "content": CLASSIFY_PROMPT.format(reply_text=reply_text)},
-                ],
+                messages=[{"role": "user", "content": user_content}],
                 temperature=0,
-                max_tokens=150,
+                max_tokens=max_tokens,
             )
         except AuthenticationError as exc:
             raise PermanentError(f"OpenAI authentication error: {exc}") from exc
@@ -52,6 +70,13 @@ class OpenAIClient:
             raise ProviderRateLimited() from exc
         except APIError as exc:
             raise TransientError(f"OpenAI API error: {exc}") from exc
+
+    def classify_reply(self, reply_text: str) -> ClassificationResult:
+        """Classify a candidate reply using the configured OpenAI model."""
+        response = self._chat_completion(
+            user_content=CLASSIFY_PROMPT.format(reply_text=reply_text),
+            max_tokens=150,
+        )
 
         raw_content = response.choices[0].message.content
         if raw_content is None:
@@ -67,3 +92,39 @@ class OpenAIClient:
         except (json.JSONDecodeError, KeyError, AttributeError, TypeError):
             logger.warning("Failed to parse classification response: %s", content)
             return ClassificationResult(sentiment="neutral", reasoning="Classification parse error")
+
+    def extract_referral(self, reply_text: str) -> ReferralExtraction:
+        """Extract referred contact info from a referral reply."""
+        response = self._chat_completion(
+            user_content=EXTRACT_REFERRAL_PROMPT.format(reply_text=reply_text),
+            max_tokens=200,
+        )
+
+        raw_content = response.choices[0].message.content
+        if raw_content is None:
+            logger.warning("OpenAI returned empty content for referral extraction")
+            return ReferralExtraction(name=None, email=None, title=None, company=None)
+        content = raw_content.strip()
+        try:
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                raise TypeError("expected JSON object")
+
+            def _opt_str(key: str) -> str | None:
+                value = parsed.get(key)
+                if value is None:
+                    return None
+                if isinstance(value, str):
+                    stripped = value.strip()
+                    return stripped if stripped else None
+                return None
+
+            return ReferralExtraction(
+                name=_opt_str("name"),
+                email=_opt_str("email"),
+                title=_opt_str("title"),
+                company=_opt_str("company"),
+            )
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Failed to parse referral extraction response: %s", content)
+            return ReferralExtraction(name=None, email=None, title=None, company=None)

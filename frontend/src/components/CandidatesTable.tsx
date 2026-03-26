@@ -28,11 +28,12 @@ interface Props {
   sequenceId: string
   onUploadCsv?: () => void
   refreshKey: number
+  onRowClick?: (enrollmentId: string) => void
 }
 
 const PAGE_SIZE = 50
 
-export default function CandidatesTable({ sequenceId, onUploadCsv, refreshKey }: Props) {
+export default function CandidatesTable({ sequenceId, onUploadCsv, refreshKey, onRowClick }: Props) {
   const [enrollments, setEnrollments] = useState<EnrollmentListItem[]>([])
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [loading, setLoading] = useState(true)
@@ -61,9 +62,8 @@ export default function CandidatesTable({ sequenceId, onUploadCsv, refreshKey }:
       }
       setEnrollments(data.items)
     } catch (err) {
-      if (isStaleRequest()) return
-
       console.error('Failed to load enrollments:', err)
+      if (isStaleRequest()) return
       setError(
         err instanceof ApiRequestError ? err.message : 'Failed to load candidates. Please try again.',
       )
@@ -111,6 +111,14 @@ export default function CandidatesTable({ sequenceId, onUploadCsv, refreshKey }:
         onAction={onUploadCsv}
         icon={Upload}
       />
+    )
+  }
+
+  if (enrollments.length === 0) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-600">
+        No candidates match the selected status filter.
+      </div>
     )
   }
 
@@ -170,7 +178,22 @@ export default function CandidatesTable({ sequenceId, onUploadCsv, refreshKey }:
           </thead>
           <tbody className="divide-y divide-gray-100">
             {enrollments.map((e) => (
-              <tr key={e.id} className="transition-colors hover:bg-gray-50">
+              <tr
+                key={e.id}
+                onClick={() => onRowClick?.(e.id)}
+                onKeyDown={(event) => {
+                  if (!onRowClick) return
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onRowClick(e.id)
+                  }
+                }}
+                tabIndex={onRowClick ? 0 : undefined}
+                role={onRowClick ? 'button' : undefined}
+                className={`transition-colors hover:bg-gray-50 ${
+                  onRowClick ? 'cursor-pointer focus-visible:bg-blue-50 focus-visible:outline-none' : ''
+                }`}
+              >
                 <td className="px-6 py-4 text-sm font-medium text-gray-900">{e.candidate_name}</td>
                 <td className="px-6 py-4 text-sm text-gray-500">{e.candidate_email}</td>
                 <td className="px-6 py-4 text-sm text-gray-700">

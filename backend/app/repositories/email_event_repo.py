@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -10,8 +9,7 @@ from app.models.email_event import EmailEvent
 from app.models.enrollment import Enrollment
 from app.models.enums import EmailDirection
 from app.models.sequence import Sequence
-
-logger = logging.getLogger(__name__)
+from app.utils.email_quotes import strip_email_quotes
 
 
 class EmailEventRepository:
@@ -51,6 +49,13 @@ class EmailEventRepository:
         )
         return result.scalar_one_or_none()
 
+    async def find_by_id_for_update(self, event_id: UUID) -> EmailEvent | None:
+        """Load an email event with a row lock (serializes concurrent referral processing)."""
+        result = await self._db.execute(
+            select(EmailEvent).where(EmailEvent.id == event_id).with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def find_by_message_id(self, nylas_message_id: str) -> EmailEvent | None:
         """Find an email event by its Nylas message ID."""
         result = await self._db.execute(
@@ -80,6 +85,21 @@ class EmailEventRepository:
             raise ValueError(f"EmailEvent {event_id} not found for sentiment update")
         await self._db.flush()
 
+    async def update_sentiment_if_unset(
+        self, event_id: UUID, sentiment: str, reasoning: str
+    ) -> bool:
+        """Set sentiment only when currently null. Returns True if this call applied the update."""
+        result = await self._db.execute(
+            update(EmailEvent)
+            .where(
+                EmailEvent.id == event_id,
+                EmailEvent.sentiment.is_(None),
+            )
+            .values(sentiment=sentiment, sentiment_reasoning=reasoning)
+        )
+        await self._db.flush()
+        return result.rowcount > 0
+
     async def get_thread(self, enrollment_id: UUID) -> list[EmailEvent]:
         """Get all email events for an enrollment, chronologically."""
         result = await self._db.execute(
@@ -95,7 +115,18 @@ class EmailEventRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
-        """Get inbound replies across all sequences for the inbox view."""
+        """Get one inbox entry per enrollment, showing the latest inbound reply."""
+        # Subquery: latest inbound event per enrollment (by created_at)
+        latest_sq = (
+            select(
+                EmailEvent.enrollment_id,
+                func.max(EmailEvent.created_at).label("latest_ts"),
+            )
+            .where(EmailEvent.direction == EmailDirection.INBOUND.value)
+            .group_by(EmailEvent.enrollment_id)
+            .subquery()
+        )
+
         stmt = (
             select(
                 EmailEvent.id,
@@ -109,10 +140,17 @@ class EmailEventRepository:
                 Candidate.email.label("candidate_email"),
                 Sequence.name.label("sequence_name"),
             )
+            .join(
+                latest_sq,
+                and_(
+                    EmailEvent.enrollment_id == latest_sq.c.enrollment_id,
+                    EmailEvent.created_at == latest_sq.c.latest_ts,
+                ),
+            )
+            .where(EmailEvent.direction == EmailDirection.INBOUND.value)
             .join(Enrollment, EmailEvent.enrollment_id == Enrollment.id)
             .join(Candidate, Enrollment.candidate_id == Candidate.id)
             .join(Sequence, Enrollment.sequence_id == Sequence.id)
-            .where(EmailEvent.direction == EmailDirection.INBOUND.value)
         )
 
         if sentiment_filter and sentiment_filter != "all":
@@ -126,7 +164,7 @@ class EmailEventRepository:
             {
                 "id": str(row.id),
                 "enrollment_id": str(row.enrollment_id),
-                "body_snippet": (row.body_text or "")[:120],
+                "body_snippet": strip_email_quotes(row.body_text or "")[:120],
                 "sentiment": row.sentiment,
                 "sentiment_reasoning": row.sentiment_reasoning,
                 "created_at": row.created_at,
@@ -139,9 +177,27 @@ class EmailEventRepository:
         ]
 
     async def get_sentiment_counts(self) -> dict[str, int]:
-        """Get count of inbound replies per sentiment for inbox tabs."""
+        """Get count of conversations (one per enrollment) per sentiment."""
+        # Use the latest inbound event per enrollment for the sentiment
+        latest_sq = (
+            select(
+                EmailEvent.enrollment_id,
+                func.max(EmailEvent.created_at).label("latest_ts"),
+            )
+            .where(EmailEvent.direction == EmailDirection.INBOUND.value)
+            .group_by(EmailEvent.enrollment_id)
+            .subquery()
+        )
+
         result = await self._db.execute(
             select(EmailEvent.sentiment, func.count(EmailEvent.id))
+            .join(
+                latest_sq,
+                and_(
+                    EmailEvent.enrollment_id == latest_sq.c.enrollment_id,
+                    EmailEvent.created_at == latest_sq.c.latest_ts,
+                ),
+            )
             .where(
                 and_(
                     EmailEvent.direction == EmailDirection.INBOUND.value,

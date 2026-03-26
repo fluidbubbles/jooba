@@ -6,6 +6,7 @@ from app.services.exceptions import (
     DomainError,
     EmailEventNotFound,
     EnrollmentNotActive,
+    EnrollmentNotFound,
     InvalidStateTransition,
     PermanentError,
     ProviderRateLimited,
@@ -36,6 +37,12 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(CandidateNotFound)
     async def candidate_not_found(
         _request: Request, exc: CandidateNotFound
+    ) -> JSONResponse:
+        return _domain_error_response(exc, 404)
+
+    @app.exception_handler(EnrollmentNotFound)
+    async def enrollment_not_found(
+        _request: Request, exc: EnrollmentNotFound
     ) -> JSONResponse:
         return _domain_error_response(exc, 404)
 

@@ -1,4 +1,5 @@
 import logging
+import re
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,13 @@ from app.tasks.dispatcher import TaskDispatcher, get_dispatcher
 from app.utils.templates import append_unsubscribe_footer, replace_placeholders
 
 logger = logging.getLogger(__name__)
+REPLY_SUBJECT_PREFIX_RE = re.compile(r"^(?:\s*re\s*:\s*)+", re.IGNORECASE)
+
+
+def build_reply_subject(subject: str | None) -> str:
+    """Normalize subject so manual replies always have a single Re: prefix."""
+    normalized = REPLY_SUBJECT_PREFIX_RE.sub("", (subject or "").strip()).strip()
+    return f"Re: {normalized}" if normalized else "Re:"
 
 
 class EmailService:
@@ -174,7 +182,7 @@ class EmailService:
         if not account:
             raise PermanentError("No email account connected")
 
-        reply_subject = f"Re: {original.subject or ''}"
+        reply_subject = build_reply_subject(original.subject)
 
         sender = get_email_sender()
         result = sender.send(

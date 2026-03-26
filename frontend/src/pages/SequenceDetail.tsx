@@ -1,6 +1,7 @@
 import { ArrowLeft, Upload } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import CandidateDetailModal from '../components/CandidateDetailModal'
 import CandidatesTable from '../components/CandidatesTable'
 import CsvUploadModal from '../components/CsvUploadModal'
 import StatCard from '../components/StatCard'
@@ -33,10 +34,11 @@ function sortedSteps(seq: Sequence) {
 }
 
 function formatStepDelay(stepIndex: number, delay: number): string {
+  const dayLabel = `${delay} day${delay === 1 ? '' : 's'}`
   if (stepIndex === 0) {
-    return delay === 0 ? 'Sends immediately' : `Delay: ${delay} min`
+    return delay === 0 ? 'Sends immediately' : `Delay: ${dayLabel}`
   }
-  return `Delay after previous: ${delay} min`
+  return `Delay after previous: ${dayLabel}`
 }
 
 function bodyPlainText(bodyHtml: string): string {
@@ -116,6 +118,7 @@ export default function SequenceDetail() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [analytics, setAnalytics] = useState<SequenceAnalytics | null>(null)
   const [enrollResult, setEnrollResult] = useState<EnrollResponse | null>(null)
+  const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<string | null>(null)
   const latestLoadRef = useRef(0)
   const latestStatusActionRef = useRef(0)
   const latestAnalyticsRefreshRef = useRef(0)
@@ -146,6 +149,7 @@ export default function SequenceDetail() {
     setStatusBusy(false)
     setActionError(null)
     setEnrollResult(null)
+    setSelectedEnrollmentId(null)
   }, [id, clearEnrollToastTimer])
 
   const loadSequence = useCallback(async () => {
@@ -229,6 +233,10 @@ export default function SequenceDetail() {
       }
     }
   }
+
+  const closeCandidateDetailModal = useCallback(() => {
+    setSelectedEnrollmentId(null)
+  }, [])
 
   if (!id) {
     return (
@@ -369,6 +377,7 @@ export default function SequenceDetail() {
                   sequence.status === 'active' ? () => setShowUploadModal(true) : undefined
                 }
                 refreshKey={refreshKey}
+                onRowClick={(enrollmentId) => setSelectedEnrollmentId(enrollmentId)}
               />
             </section>
           </>
@@ -380,6 +389,13 @@ export default function SequenceDetail() {
           sequenceId={id}
           onClose={() => setShowUploadModal(false)}
           onEnrolled={handleEnrolled}
+        />
+      )}
+
+      {selectedEnrollmentId && (
+        <CandidateDetailModal
+          enrollmentId={selectedEnrollmentId}
+          onClose={closeCandidateDetailModal}
         />
       )}
     </div>

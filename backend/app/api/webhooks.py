@@ -2,6 +2,7 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -67,5 +68,5 @@ async def nylas_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.get("/webhook")
 async def nylas_webhook_challenge(challenge: str = ""):
-    """Nylas webhook verification -- echo the challenge parameter."""
-    return {"challenge": challenge}
+    """Nylas webhook verification -- echo the challenge parameter as plain text."""
+    return PlainTextResponse(challenge)

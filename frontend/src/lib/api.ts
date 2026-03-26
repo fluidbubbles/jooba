@@ -1,6 +1,8 @@
 import type {
   ApiError,
+  CandidateDetail,
   CandidateInput,
+  DashboardStats,
   EnrollmentStatus,
   EnrollResponse,
   InboxReply,
@@ -8,13 +10,16 @@ import type {
   NylasConnection,
   NylasDisconnectResponse,
   PaginatedEnrollments,
+  ReferralInfo,
   ReplyDetail,
+  SendReplyResponse,
   Sequence,
   SequenceAnalytics,
   SequenceCreateInput,
   SequenceListItem,
   SequenceStatus,
   SequenceUpdateInput,
+  Sentiment,
   SentimentCounts,
 } from './types'
 
@@ -30,6 +35,10 @@ export class ApiRequestError extends Error {
     this.status = status
     this.code = code
   }
+}
+
+export function getApiErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiRequestError ? err.message : fallback
 }
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -97,6 +106,31 @@ export const api = {
     },
   },
 
+  analytics: {
+    dashboard(): Promise<DashboardStats> {
+      return apiFetch<DashboardStats>('/analytics/dashboard')
+    },
+  },
+
+  referrals: {
+    info(eventId: string): Promise<ReferralInfo | null> {
+      return apiFetch<ReferralInfo | null>(`/inbox/replies/${eventId}/referral`)
+    },
+
+    enroll(eventId: string, sequenceId: string): Promise<EnrollResponse> {
+      return apiFetch<EnrollResponse>(`/inbox/replies/${eventId}/referral/enroll`, {
+        method: 'POST',
+        body: JSON.stringify({ sequence_id: sequenceId }),
+      })
+    },
+  },
+
+  candidates: {
+    timeline(enrollmentId: string): Promise<CandidateDetail> {
+      return apiFetch<CandidateDetail>(`/enrollments/${enrollmentId}/timeline`)
+    },
+  },
+
   nylas: {
     status(): Promise<NylasConnection> {
       return apiFetch<NylasConnection>('/nylas/status')
@@ -112,7 +146,7 @@ export const api = {
   },
 
   inbox: {
-    replies(sentiment?: string, limit = 50, offset = 0): Promise<InboxReply[]> {
+    replies(sentiment?: Sentiment | 'all', limit = 50, offset = 0): Promise<InboxReply[]> {
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
       if (sentiment && sentiment !== 'all') params.set('sentiment', sentiment)
       return apiFetch<InboxReply[]>(`/inbox/replies?${params}`)
@@ -126,8 +160,8 @@ export const api = {
       return apiFetch<ReplyDetail>(`/inbox/replies/${eventId}`)
     },
 
-    sendReply(eventId: string, bodyHtml: string): Promise<{ message_id: string; event_id: string }> {
-      return apiFetch<{ message_id: string; event_id: string }>(`/replies/${eventId}/reply`, {
+    sendReply(eventId: string, bodyHtml: string): Promise<SendReplyResponse> {
+      return apiFetch<SendReplyResponse>(`/replies/${eventId}/reply`, {
         method: 'POST',
         body: JSON.stringify({ body_html: bodyHtml }),
       })
