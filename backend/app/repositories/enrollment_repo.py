@@ -7,13 +7,13 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
-
 from app.models.candidate import Candidate
 from app.models.email_event import EmailEvent
 from app.models.enrollment import Enrollment
 from app.models.enums import EmailDirection, EnrollmentStatus, Sentiment
 from app.models.state_transition import StateTransition
+
+logger = logging.getLogger(__name__)
 
 
 def _format_candidate_name(
