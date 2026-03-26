@@ -134,8 +134,9 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
           )
         }
       },
-      error: () => {
-        setError('Could not parse this file. Make sure it is a valid CSV.')
+      error: (err) => {
+        console.error('CSV parse error:', err)
+        setError(`Could not parse this file: ${err.message ?? 'unknown error'}. Make sure it is a valid CSV.`)
       },
     })
   }, [])
@@ -162,6 +163,7 @@ export default function CsvUploadModal({ sequenceId, onClose, onEnrolled }: Prop
       } else {
         setError(err instanceof ApiRequestError ? err.message : 'Failed to enroll candidates')
       }
+    } finally {
       setEnrolling(false)
     }
   }

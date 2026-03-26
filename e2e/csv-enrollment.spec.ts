@@ -265,7 +265,7 @@ test.describe('CSV Enrollment — Error Handling', () => {
     expect(body.code).toBe('INVALID_SEQUENCE_DATA')
   })
 
-  test('non-CSV file shows parse error', async ({ page }) => {
+  test('non-CSV file shows parse error with details', async ({ page }) => {
     await page.goto(`/sequences/${seqId}`)
 
     await openUploadModal(page)
@@ -274,10 +274,43 @@ test.describe('CSV Enrollment — Error Handling', () => {
     const fileInput = page.locator('input[type="file"][accept=".csv"]')
     await fileInput.setInputFiles(path.resolve(__dirname, '../playwright.config.ts'))
 
-    // Should show either a parse error or no valid rows
+    // Should show a parse error or no-valid-rows error with detail text
     const dialog = page.getByRole('dialog')
     const alert = dialog.getByRole('alert')
     await expect(alert).toBeVisible({ timeout: 5_000 })
+    // Verify the error message includes detail (not just a generic string)
+    await expect(alert).toContainText(/Could not parse|No valid rows|invalid email|Could not find/i)
+  })
+
+  test('enroll button re-enables after API error', async ({ page }) => {
+    await page.goto(`/sequences/${seqId}`)
+
+    await openUploadModal(page)
+    await uploadCsvFile(page, 'good_candidates.csv')
+
+    const dialog = page.getByRole('dialog')
+    const enrollBtn = dialog.getByRole('button', { name: /^Enroll \d+/ })
+    await expect(enrollBtn).toBeEnabled()
+
+    // Intercept the enroll API to return a 500 error
+    await page.route('**/api/sequences/*/enroll', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"Server error","code":"INTERNAL"}' }),
+    )
+
+    try {
+      await enrollBtn.click()
+
+      // Error alert should appear with meaningful message
+      const alert = dialog.getByRole('alert')
+      await expect(alert).toBeVisible({ timeout: 5_000 })
+      await expect(alert).toContainText(/Server error|Failed to enroll/i)
+
+      // Button must NOT be stuck on "Enrolling..." — it should be re-enabled
+      await expect(enrollBtn).toBeEnabled()
+      await expect(enrollBtn).not.toContainText('Enrolling')
+    } finally {
+      await page.unroute('**/api/sequences/*/enroll')
+    }
   })
 })
 
