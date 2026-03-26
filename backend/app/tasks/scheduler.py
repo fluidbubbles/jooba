@@ -4,6 +4,7 @@ import logging
 from app.celery_app import celery_app
 from app.database import async_session
 from app.repositories.enrollment_repo import EnrollmentRepository
+from app.tasks.dispatcher import get_dispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +22,15 @@ async def _claim_and_dispatch() -> None:
         await db.commit()
 
     logger.debug("Scheduler claimed %d enrollment(s) for sending", len(claimed_ids))
+    dispatcher = get_dispatcher()
     for enrollment_id in claimed_ids:
-        celery_app.send_task(
-            "app.tasks.email_sending.send_sequence_email",
-            args=[str(enrollment_id)],
-            queue="email",
-        )
+        try:
+            dispatcher.dispatch(
+                "app.tasks.email_sending.send_sequence_email",
+                str(enrollment_id),
+                queue="email",
+            )
+        except Exception:
+            logger.exception(
+                "Failed to dispatch send task for enrollment %s", enrollment_id
+            )

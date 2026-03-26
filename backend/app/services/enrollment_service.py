@@ -1,11 +1,14 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+logger = logging.getLogger(__name__)
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations.email_sender import get_email_sender
+from app.integrations.email_sender import EmailSender, get_email_sender
 from app.models.email_event import EmailEvent
 from app.models.enums import EmailDirection, EnrollmentStatus, SequenceStatus
 from app.repositories.candidate_repo import CandidateRepository
@@ -139,27 +142,32 @@ class EnrollmentService:
         sender = get_email_sender()
         await self._advance_step(enrollment_id, sender=sender, grant_id=account.grant_id)
 
-    async def _advance_step(self, enrollment_id: UUID, sender: Any, grant_id: str) -> None:
-        """Send the next email for an enrollment. All business logic here."""
+    async def _advance_step(self, enrollment_id: UUID, sender: EmailSender, grant_id: str) -> None:
+        """Send the current step's email, record the event, and advance to the next step or complete."""
         enrollment = await self._enrollment_repo.get_by_id(enrollment_id)
         if not enrollment:
+            logger.error("Enrollment %s not found during advance_step", enrollment_id)
             return
 
         if enrollment.status != EnrollmentStatus.ACTIVE.value:
+            logger.debug("Skipping advance_step for enrollment %s — status=%s", enrollment_id, enrollment.status)
             return
 
         sequence = await self._sequence_repo.get_by_id(enrollment.sequence_id)
         if not sequence or not sequence.steps:
+            logger.error("Sequence %s missing or has no steps for enrollment %s", enrollment.sequence_id, enrollment_id)
             return
 
         step_index = enrollment.current_step
         if step_index >= len(sequence.steps):
+            logger.error("Step index %d out of range for enrollment %s (sequence has %d steps)", step_index, enrollment_id, len(sequence.steps))
             return
 
         step = sequence.steps[step_index]
 
         candidate = await self._candidate_repo.get_by_id(enrollment.candidate_id)
         if not candidate:
+            logger.error("Candidate %s not found for enrollment %s", enrollment.candidate_id, enrollment_id)
             return
 
         composed = EmailService.compose(step, candidate, enrollment.unsubscribe_token)

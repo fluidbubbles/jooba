@@ -2,6 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
+from app.celery_app import celery_app
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -17,10 +18,6 @@ class CeleryDispatcher(TaskDispatcher):
     """Production — dispatches to Celery queues."""
 
     def dispatch(self, task_name: str, *args: object, **kwargs: object) -> None:
-        # Deferred import: celery_app autodiscovers this package, so top-level
-        # import would create a circular dependency.
-        from app.celery_app import celery_app
-
         queue = kwargs.pop("queue", "default")
         celery_app.send_task(task_name, args=args, kwargs=kwargs, queue=queue)
 

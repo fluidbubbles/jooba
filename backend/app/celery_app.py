@@ -23,8 +23,5 @@ celery_app.conf.update(
             "schedule": 30.0,
         },
     },
-)
-
-celery_app.conf.update(
     include=["app.tasks.scheduler", "app.tasks.email_sending"],
 )

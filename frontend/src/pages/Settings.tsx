@@ -24,7 +24,7 @@ export default function Settings() {
     void load()
   }, [])
 
-  const handleConnect = async () => {
+  async function handleConnect() {
     try {
       const { url } = await api.nylas.authUrl()
       window.location.href = url
@@ -33,7 +33,7 @@ export default function Settings() {
     }
   }
 
-  const handleDisconnect = async () => {
+  async function handleDisconnect() {
     setDisconnecting(true)
     try {
       await api.nylas.disconnect()

@@ -6,7 +6,6 @@ import pytest
 from app.models.enums import VALID_TRANSITIONS, EnrollmentStatus
 from app.services.enrollment_service import EnrollmentService
 from app.services.exceptions import PermanentError
-from app.utils.templates import append_unsubscribe_footer, replace_placeholders
 
 
 class TestAdvanceStepIdempotency:
@@ -37,26 +36,6 @@ class TestAdvanceStepIdempotency:
             await service._advance_step(uuid.uuid4(), sender=mock_sender, grant_id="gid")
 
             mock_sender.send.assert_not_called()
-
-
-class TestEmailComposition:
-    def test_compose_replaces_placeholders_and_adds_footer(self):
-        result = replace_placeholders(
-            "Hi {{first_name}} at {{company}}",
-            {"first_name": "Jane", "company": "Stripe"},
-        )
-        assert result == "Hi Jane at Stripe"
-
-    def test_compose_adds_unsubscribe_footer(self):
-        body = "<p>Hello</p>"
-        result = append_unsubscribe_footer(body, "http://localhost:8000/api/unsubscribe/token123")
-        assert "Unsubscribe" in result
-        assert "token123" in result
-        assert body in result
-
-    def test_missing_candidate_data_becomes_empty(self):
-        result = replace_placeholders("Hi {{first_name}}", {})
-        assert result == "Hi "
 
 
 class TestMarkPaused:

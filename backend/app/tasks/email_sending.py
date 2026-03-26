@@ -23,7 +23,7 @@ TRANSIENT_BACKOFFS = [30, 60, 120, 240, 480]
     soft_time_limit=60,
 )
 def send_sequence_email(self: Task, enrollment_id: str) -> None:
-    """Thin wrapper: calls service, applies retry policy per error type."""
+    """Celery task entry point: delegates to service, with retry policy per exception type."""
     try:
         asyncio.run(_send(enrollment_id))
     except ProviderRateLimited as e:
@@ -53,6 +53,17 @@ def send_sequence_email(self: Task, enrollment_id: str) -> None:
             asyncio.run(_pause_enrollment(enrollment_id))
         except Exception:
             logger.exception("Failed to pause enrollment after permanent error")
+    except Exception:
+        logger.exception("Unexpected error for enrollment %s", enrollment_id)
+        retries = self.request.retries
+        if retries >= TRANSIENT_MAX_RETRIES:
+            try:
+                asyncio.run(_pause_enrollment(enrollment_id))
+            except Exception:
+                logger.exception("Failed to pause enrollment %s after unexpected error", enrollment_id)
+            return
+        backoff = TRANSIENT_BACKOFFS[min(retries, len(TRANSIENT_BACKOFFS) - 1)]
+        raise self.retry(countdown=backoff, max_retries=TRANSIENT_MAX_RETRIES)
 
 
 async def _send(enrollment_id: str) -> None:

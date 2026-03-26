@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 from app.core.config import settings
 from app.integrations.nylas_client import NylasClient, SendResult
+from app.services.exceptions import PermanentError, ProviderRateLimited, TransientError
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,21 @@ class NylasSender(EmailSender):
         body_html: str,
         reply_to_message_id: str | None = None,
     ) -> SendResult:
-        return self.client.send_email(grant_id, to, subject, body_html, reply_to_message_id)
+        try:
+            return self.client.send_email(grant_id, to, subject, body_html, reply_to_message_id)
+        except ProviderRateLimited:
+            raise
+        except TransientError:
+            raise
+        except PermanentError:
+            raise
+        except Exception as e:
+            error_str = str(e).lower()
+            if "rate" in error_str or "429" in error_str:
+                raise ProviderRateLimited() from e
+            if "401" in error_str or "403" in error_str or "auth" in error_str:
+                raise PermanentError(f"Nylas auth error: {e}") from e
+            raise TransientError(f"Nylas send error: {e}") from e
 
 
 class MockSender(EmailSender):
