@@ -15,6 +15,8 @@ export default function ReplyComposer({ onSend }: Props) {
     try {
       await onSend(`<p>${body.replace(/\n/g, '</p><p>')}</p>`)
       setBody('')
+    } catch (err) {
+      console.error('Failed to send reply', err)
     } finally {
       setSending(false)
     }

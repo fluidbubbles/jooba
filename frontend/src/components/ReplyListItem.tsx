@@ -1,6 +1,6 @@
-import SentimentBadge from './SentimentBadge'
 import { Clock } from 'lucide-react'
 import type { InboxReply } from '../lib/types'
+import SentimentBadge from './SentimentBadge'
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()

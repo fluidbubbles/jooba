@@ -143,7 +143,7 @@ export interface ThreadEvent {
   subject: string | null
   body_html: string | null
   body_text: string | null
-  sentiment: string | null
+  sentiment: Sentiment | null
   sentiment_reasoning: string | null
   is_manual_reply: boolean
   step_index: number | null
@@ -155,7 +155,7 @@ export interface ReplyDetail {
   candidate_name: string
   candidate_email: string
   sequence_name: string
-  sentiment: string | null
+  sentiment: Sentiment | null
   sentiment_reasoning: string | null
   thread: ThreadEvent[]
 }

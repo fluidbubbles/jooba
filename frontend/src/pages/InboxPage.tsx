@@ -23,11 +23,14 @@ export default function InboxPage() {
   const [detail, setDetail] = useState<ReplyDetail | null>(null)
   const [activeTab, setActiveTab] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [listError, setListError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<string | null>(null)
   const loadTokenRef = useRef(0)
   const detailTokenRef = useRef(0)
 
   const fetchReplies = useCallback((tab: string) => {
     const token = ++loadTokenRef.current
+    setListError(null)
     Promise.all([
       api.inbox.replies(tab),
       api.inbox.counts(),
@@ -41,7 +44,10 @@ export default function InboxPage() {
       }
     }).catch((err) => {
       console.error('Failed to load inbox replies', err)
-      if (loadTokenRef.current === token) setLoading(false)
+      if (loadTokenRef.current === token) {
+        setListError('Failed to load inbox. Check your connection and try again.')
+        setLoading(false)
+      }
     })
   }, [])
 
@@ -69,7 +75,6 @@ export default function InboxPage() {
     setActiveTab(tab)
     setSelectedId(null)
     setDetail(null)
-    setLoading(true)
   }
 
   const handleSelectReply = (id: string) => {
@@ -79,17 +84,38 @@ export default function InboxPage() {
 
   const handleSendReply = async (bodyHtml: string) => {
     if (!selectedId) return
+    setSendError(null)
     try {
       await api.inbox.sendReply(selectedId, bodyHtml)
+    } catch (err) {
+      console.error('Failed to send reply', err)
+      setSendError('Failed to send reply. Please try again.')
+      throw err
+    }
+    try {
       const updated = await api.inbox.detail(selectedId)
       setDetail(updated)
     } catch (err) {
-      console.error('Failed to send reply', err)
+      console.error('Failed to refresh thread after send', err)
     }
   }
 
   if (loading) {
     return <div className="p-8 text-gray-400">Loading...</div>
+  }
+
+  if (listError) {
+    return (
+      <div className="p-8">
+        <p className="text-red-400 mb-4">{listError}</p>
+        <button
+          onClick={() => fetchReplies(activeTab)}
+          className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg"
+        >
+          Retry
+        </button>
+      </div>
+    )
   }
 
   const totalReplies = counts?.all ?? 0
@@ -146,7 +172,7 @@ export default function InboxPage() {
             ))}
             {replies.length === 0 && (
               <div className="p-6 text-center text-gray-500 text-sm">
-                No {activeTab !== 'all' ? activeTab.replace('_', ' ') : ''} replies
+                No {activeTab !== 'all' ? activeTab.replaceAll('_', ' ') : ''} replies
               </div>
             )}
           </div>
@@ -174,6 +200,9 @@ export default function InboxPage() {
                 <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">Thread</h3>
                 <ThreadView thread={detail.thread} candidateName={detail.candidate_name} />
 
+                {sendError && (
+                  <p className="text-red-400 text-sm mt-2">{sendError}</p>
+                )}
                 <ReplyComposer onSend={handleSendReply} />
               </div>
             ) : (
