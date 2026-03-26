@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 
 from app.celery_app import celery_app
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +33,16 @@ class SyncDispatcher(TaskDispatcher):
     def dispatch(self, task_name: str, *args: object, **kwargs: object) -> None:
         kwargs.pop("queue", None)
         func = self._registry.get(task_name)
-        if func:
-            func(*args, **kwargs)
-        else:
+        if not func:
             logger.warning("[SyncDispatcher] No handler for %s", task_name)
+            return
+        func(*args, **kwargs)
 
 
 def get_dispatcher() -> TaskDispatcher:
-    if settings.email_provider == "mock":
-        return SyncDispatcher()
+    """Always Celery in production: EMAIL_PROVIDER=mock swaps MockSender only.
+
+    Beat and workers must still enqueue tasks; SyncDispatcher is test-only and
+    has no handlers when the app runs for real.
+    """
     return CeleryDispatcher()

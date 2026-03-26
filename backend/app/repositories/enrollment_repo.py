@@ -259,6 +259,22 @@ class EnrollmentRepository:
         rows = result.fetchall()
         return [row[0] for row in rows]
 
+    async def requeue_claimed_enrollment(self, enrollment_id: UUID) -> None:
+        """Restore immediate eligibility when scheduler dispatch fails."""
+        await self._db.execute(
+            text("""
+                UPDATE enrollments
+                SET next_send_at = now(), updated_at = now()
+                WHERE id = :enrollment_id
+                  AND status = :status
+                  AND next_send_at IS NULL
+            """),
+            {
+                "enrollment_id": enrollment_id,
+                "status": EnrollmentStatus.ACTIVE.value,
+            },
+        )
+
     async def log_transition(
         self,
         enrollment_id: UUID,

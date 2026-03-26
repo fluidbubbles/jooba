@@ -73,6 +73,9 @@ Vite proxies `/api` and `/health` to `VITE_DEV_PROXY_TARGET` (Compose sets `http
 - **Postgres:** Published as `127.0.0.1:5432:5432` only.
 - **README.md** env snippet may show `postgresql://` for DB; backend Settings expect **`+asyncpg`** — align when debugging connection errors.
 - **API integration tests:** `tests/test_*_api.py` files need `TEST_DATABASE_URL` (see `backend/CLAUDE.md` for the Compose one-liner and truncate safety flag). Shared fixtures live in `tests/conftest.py`.
+- **Poetry lock:** After adding dependencies to `pyproject.toml`, run `cd backend && poetry lock` before `docker compose up --build`. Docker build fails if the lock file is stale.
+- **Celery task registration:** Use `include=["app.tasks.module_name"]` in `celery_app.conf.update()`, not `autodiscover_tasks()`, because autodiscover looks for a `tasks.py` file inside packages and won't find individually named task modules.
+- **Docker env passthrough:** All services sharing backend config (backend, celery-worker, celery-beat) must use the same YAML anchor (`<<: *backend-service-env`). Adding a new env var to one service but not others causes silent empty-string defaults at runtime.
 
 ## Universal implementation rules
 
@@ -96,7 +99,10 @@ Use these defaults unless the user explicitly overrides. These rules apply to al
 - **No dead infrastructure:** Do not add DB columns, service methods, or config fields for features that have no consumer in the current plan. Add them when the consuming code is built.
 - **Celery task contract:** Tasks use `asyncio.run()` to call async services. All imports at module top (not inside inner async functions). Tasks know services only — no repo/integration imports in task files.
 - **Strategy pattern ABCs (EmailSender, Classifier, TaskDispatcher):** Keep these interfaces; they enable testability and provider swapping. Do not inline `if/else` provider switching into service methods.
+- **Integration exception translation:** Integration adapters (NylasSender, Classifier implementations) must catch provider SDK exceptions and translate them into domain errors (TransientError, PermanentError, ProviderRateLimited) at the integration boundary. Never let raw SDK exceptions propagate to services or tasks.
+- **Dispatcher usage is mandatory:** All async task dispatch must go through `get_dispatcher()`, including from scheduler tasks. `get_dispatcher()` always returns `CeleryDispatcher` in runtime so beat/worker enqueue real tasks; `EMAIL_PROVIDER=mock` only swaps `MockSender`, not the queue. Use `SyncDispatcher` explicitly in tests when you register handlers. Do not call `celery_app.send_task()` from application code outside the dispatcher implementation.
 - **Unreplied detection is query-based:** No nudge timer columns (`nudge_due_at`, `nudge_dismissed`) or `set_nudge()` methods. Use `email_event_repo.get_unreplied_inbound()` query per architecture Section 5.7.
+- **Step delay unit convention:** The `delay` field is unit-agnostic throughout the stack (API, frontend, DB column `delay_minutes`). The scheduler is the sole interpreter of units — it multiplies by 1440 to convert the stored value (days) to minutes for `timedelta`. Frontend labels say "days"; no conversion happens in API or frontend code.
 - **Frontend API helper name:** The shared request function is `apiFetch` (defined in `src/lib/api.ts`). Never introduce `request`, `fetchApi`, or other aliases — all plans must use `apiFetch`.
 - **Analytics batch queries:** Dashboard `get_sequence_summaries()` must use batch GROUP BY queries across all sequences, not per-sequence loops (N+1). Applies to any repository aggregation method.
 

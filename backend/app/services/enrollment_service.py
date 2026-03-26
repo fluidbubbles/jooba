@@ -3,8 +3,6 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-logger = logging.getLogger(__name__)
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +20,8 @@ from app.utils.unsubscribe import generate_unsubscribe_token, verify_unsubscribe
 
 if TYPE_CHECKING:
     from app.models.sequence import Sequence
+
+logger = logging.getLogger(__name__)
 
 
 class EnrollmentService:
@@ -132,6 +132,14 @@ class EnrollmentService:
     async def get_analytics(self, sequence_id: UUID) -> dict[str, int]:
         await self._get_sequence_or_raise(sequence_id)
         return await self._enrollment_repo.get_analytics(sequence_id)
+
+    async def claim_due_enrollments_for_sending(self, limit: int = 100) -> list[UUID]:
+        """Claim due enrollments for scheduler dispatch."""
+        return await self._enrollment_repo.claim_due_enrollments(limit=limit)
+
+    async def requeue_claimed_enrollment(self, enrollment_id: UUID) -> None:
+        """Restore a claimed enrollment to immediate eligibility after dispatch failure."""
+        await self._enrollment_repo.requeue_claimed_enrollment(enrollment_id)
 
     async def send_email_for_enrollment(self, enrollment_id: UUID) -> None:
         """Entry point for the send task. Resolves sender + account, then delegates."""

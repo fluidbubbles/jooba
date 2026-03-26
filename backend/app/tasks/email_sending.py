@@ -15,6 +15,17 @@ TRANSIENT_MAX_RETRIES = 5
 TRANSIENT_BACKOFFS = [30, 60, 120, 240, 480]
 
 
+def _transient_backoff_seconds(retries: int) -> int:
+    return TRANSIENT_BACKOFFS[min(retries, len(TRANSIENT_BACKOFFS) - 1)]
+
+
+def _pause_enrollment_safe(enrollment_id: str, msg: str, *msg_args: object) -> None:
+    try:
+        asyncio.run(_pause_enrollment(enrollment_id))
+    except Exception:
+        logger.exception(msg, *msg_args)
+
+
 @celery_app.task(
     name="app.tasks.email_sending.send_sequence_email",
     bind=True,
@@ -36,12 +47,11 @@ def send_sequence_email(self: Task, enrollment_id: str) -> None:
                 "Transient error after %d retries, pausing enrollment %s",
                 retries, enrollment_id,
             )
-            try:
-                asyncio.run(_pause_enrollment(enrollment_id))
-            except Exception:
-                logger.exception("Failed to pause enrollment after max retries")
+            _pause_enrollment_safe(
+                enrollment_id, "Failed to pause enrollment after max retries"
+            )
             return
-        backoff = TRANSIENT_BACKOFFS[min(retries, len(TRANSIENT_BACKOFFS) - 1)]
+        backoff = _transient_backoff_seconds(retries)
         logger.warning(
             "Transient error, retry %d/%d in %ds: %s",
             retries + 1, TRANSIENT_MAX_RETRIES, backoff, e,
@@ -49,20 +59,20 @@ def send_sequence_email(self: Task, enrollment_id: str) -> None:
         raise self.retry(countdown=backoff, max_retries=TRANSIENT_MAX_RETRIES)
     except PermanentError as e:
         logger.error("Permanent error for enrollment %s: %s", enrollment_id, e)
-        try:
-            asyncio.run(_pause_enrollment(enrollment_id))
-        except Exception:
-            logger.exception("Failed to pause enrollment after permanent error")
+        _pause_enrollment_safe(
+            enrollment_id, "Failed to pause enrollment after permanent error"
+        )
     except Exception:
         logger.exception("Unexpected error for enrollment %s", enrollment_id)
         retries = self.request.retries
         if retries >= TRANSIENT_MAX_RETRIES:
-            try:
-                asyncio.run(_pause_enrollment(enrollment_id))
-            except Exception:
-                logger.exception("Failed to pause enrollment %s after unexpected error", enrollment_id)
+            _pause_enrollment_safe(
+                enrollment_id,
+                "Failed to pause enrollment %s after unexpected error",
+                enrollment_id,
+            )
             return
-        backoff = TRANSIENT_BACKOFFS[min(retries, len(TRANSIENT_BACKOFFS) - 1)]
+        backoff = _transient_backoff_seconds(retries)
         raise self.retry(countdown=backoff, max_retries=TRANSIENT_MAX_RETRIES)
 
 

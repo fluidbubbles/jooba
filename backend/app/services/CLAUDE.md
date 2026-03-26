@@ -10,6 +10,7 @@ Architecture source: `docs/architecture/architecture.md` (Service Layer Pattern 
 - Keep services orchestration-focused; query mechanics belong in repositories and provider SDK calls belong in integrations implementations.
 - Services orchestrate repositories plus integration interfaces, not framework/transport concerns.
 - Validate cross-step invariants (for example sequence first-step delay rules) before persistence.
+- Log guard-clause early returns at appropriate levels: `DEBUG` for idempotency guards (expected re-delivery), `ERROR` for data integrity issues (missing enrollment/sequence/candidate). Never return silently from a method that processes claimed work.
 
 ## Transaction and state requirements
 

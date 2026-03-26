@@ -18,6 +18,17 @@ class TestReplacePlaceholders:
         )
         assert result == "Jane and Jane"
 
+    def test_unknown_placeholder_is_left_as_is(self):
+        result = replace_placeholders(
+            "Hi {{custom_field}}",
+            {"first_name": "Jane"},
+        )
+        assert result == "Hi {{custom_field}}"
+
+    def test_known_placeholder_is_case_insensitive(self):
+        result = replace_placeholders("Hi {{First_Name}}", {"first_name": "Jane"})
+        assert result == "Hi Jane"
+
     def test_preserves_text_without_placeholders(self):
         result = replace_placeholders("No placeholders here", {"first_name": "Jane"})
         assert result == "No placeholders here"
