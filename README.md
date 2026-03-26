@@ -6,10 +6,10 @@ An end-to-end web app that automates recruiter email outreach. Connect an email 
 
 ### 1. Get API keys
 
-| Service | What you need | Where to get it |
-|---------|--------------|-----------------|
-| Nylas | Client ID + API key | [dashboard.nylas.com](https://dashboard.nylas.com) — create an app, copy credentials |
-| OpenAI | API key | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| Service | What you need 
+|---------|--------------|
+| Nylas | Client ID + API key |
+| OpenAI | API key |
 
 ### 2. Configure environment
 
@@ -28,7 +28,7 @@ OPENAI_API_KEY=sk-...
 # NYLAS_WEBHOOK_URL=https://your-domain.com/api/nylas/webhook
 ```
 
-Without `NYLAS_WEBHOOK_URL`, the app falls back to polling Nylas every 5 minutes. With it, webhooks deliver messages in real-time. Polling always runs regardless — it's a fault-tolerance layer that catches any messages webhooks may have missed due to network blips, downtime, or delivery failures. Both paths feed into the same `process_webhook()` pipeline with message-level deduplication, so duplicates are never processed twice. The webhook signing secret is auto-stored in the database when the webhook is registered during OAuth — no manual configuration needed.
+Without `NYLAS_WEBHOOK_URL`, the app falls back to polling Nylas every 5 minutes. With it, webhooks deliver messages in real-time. Polling always runs regardless — it's a fault-tolerance layer that catches any messages webhooks may have missed due to network blips, downtime, or delivery failures. Both paths feed into the same `process_webhook()` pipeline with message-level deduplication, so duplicates are never processed twice. The webhook signing secret is auto-stored in the database when the webhook is registered during OAuth —for ease of use purpose for this task, no manual configuration needed.
 
 > **Faster polling for testing:** The polling interval is set in `backend/app/celery_app.py` under `beat_schedule["poll-nylas-messages"]["schedule"]`. Change `300.0` to `10.0` for 10-second polling, then restart: `docker compose restart celery-beat`
 
@@ -61,7 +61,6 @@ The first command starts all five services (API, frontend, worker, beat schedule
 2. Activate the sequence
 3. Upload a CSV of candidates (columns: `email`, `first_name`, `last_name`, `company`, `title`)
 4. The scheduler picks up due emails every 30 seconds and sends them
-5. Replies appear in the Inbox with AI-classified sentiment
 
 ## What It Does
 
@@ -127,8 +126,7 @@ Five processes, one codebase:
 
 ## Why This Architecture
 
-This is a take-home project, but I built it with production structure. The patterns here aren't over-engineering — they solve real problems that show up the moment you run async email sending at any scale.
-
+This is a take-home project, but I built it with production structure. The patterns used are for decoupled structure, wont matter for one off but I guess this task is to show how I would make a system. Helpful for humans and AI
 **Concurrency is handled at the database level.** The scheduler claims due enrollments using `FOR UPDATE SKIP LOCKED`. Multiple workers can run simultaneously and never double-send the same email. The DB itself arbitrates who gets the work.
 
 **Failures are expected and tolerated.** Celery tasks use `acks_late=True` so unfinished work is redelivered on crash. A 3-tier retry policy handles transient failures (retry with backoff), rate limits (retry indefinitely), and permanent failures (pause the enrollment for recruiter review). The system degrades gracefully instead of losing emails.
@@ -146,7 +144,6 @@ This is a take-home project, but I built it with production structure. The patte
 - **Single recruiter, no auth.** The spec says "assume a single recruiter user." All endpoints are public. Adding auth is middleware — the architecture supports it without restructuring.
 - **Synchronous CSV parsing.** Uploads are processed in one API call. Fine for 50–500 candidates. For 10K+, this would move to a background task with progress tracking.
 - **Opt-out is per-enrollment.** Unsubscribing stops one sequence, not all. A production system would add a `do_not_contact` flag on the candidate and check it before every send.
-- **Webhook race condition is handled.** Celery tasks are dispatched before the webhook DB transaction commits. If a task runs before the commit, the service raises `EmailEventNotFound`, which triggers the task's retry policy (exponential backoff for classification, immediate retry for enrollment state). The window is sub-millisecond in practice, but the retry ensures correctness under load.
 - **No deliverability controls.** No sending limits UI, no SPF/DKIM config, no domain warmup tracking. Important for production but out of scope here.
 - **Referral auto-enrollment trusts LLM output.** Extracted referrals surface in the UI for review. A production system would validate that extracted emails appear literally in the reply text before acting on them.
 
@@ -155,14 +152,14 @@ This is a take-home project, but I built it with production structure. The patte
 ### Next 2–3 days (high impact, low effort)
 
 - **Per-channel rate limiting** — Enforce sending limits per email account to protect sender reputation and avoid provider throttling.
-- **Candidate scoring & staged sends** — Candidates arrive pre-scored from Jooba's search. Send to the highest-scored batch first, monitor response rates, then expand to the next tier. This turns every sequence into a natural A/B test — if the top batch doesn't respond, adjust the messaging before reaching the rest.
+- **Candidate scoring & staged sends** — Candidates arrive pre-scored from Jooba's search. Send to the highest-scored batch first, monitor response rates, then expand to the next tier. Depending on the number of results do a batched outreach. (if this is useful)
 - **UI polish** — Better experience overall, richer email editor, drag-and-drop sequence builder, sequence forming animations.
+- **AI sequence generation** — Recruiter provides role context, the LLM generates a full email sequence. The system would ship with a library of proven prompts organized by role type (backend engineer, product manager, etc.) that it selects automatically. Recruiters can also bring their own templates if they prefer.
 
 ### Next 1–2 weeks (high impact, moderate effort)
 
-- **AI sequence generation** — Recruiter provides role context, the LLM generates a full email sequence. The system would ship with a library of proven prompts organized by role type (backend engineer, product manager, etc.) that it selects automatically. Recruiters can also bring their own templates if they prefer.
 - **Message effectiveness analysis** — Track which subject lines, tones, and formats get the most replies over time. Surface insights like "shorter first emails get 2x more responses for senior engineers." Basically A/B testing of sequences.
-- **Slack/Telegram integration** — Notify recruiters of new replies, interested candidates, or referrals in the channels they already live in.
+- **Slack/Telegram integration** — Make the system usable with good UX with messaging apps (ease of use)
 - **Agentic reply handling** — Pair the state machine with an LLM to handle common low-stakes scenarios autonomously: propose meeting times based on calendar availability, ask clarifying questions when a referral is missing contact info, or confirm details when a candidate's reply is ambiguous. The recruiter stays in the loop for high-stakes decisions (interested candidates, negotiations) but routine back-and-forth happens automatically.
 
 ### Longer term (structural changes)
