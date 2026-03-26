@@ -52,3 +52,8 @@ class TransientError(DomainError):
 class PermanentError(DomainError):
     def __init__(self, message: str = "Permanent provider error") -> None:
         super().__init__(message, "PERMANENT_ERROR")
+
+
+class EmailEventNotFound(DomainError):
+    def __init__(self, event_id: str | UUID) -> None:
+        super().__init__(f"Email event not found: {event_id}", "EMAIL_EVENT_NOT_FOUND")

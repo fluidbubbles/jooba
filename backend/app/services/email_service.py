@@ -13,7 +13,7 @@ from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.email_event_repo import EmailEventRepository
 from app.repositories.enrollment_repo import EnrollmentRepository
 from app.repositories.nylas_account_repo import NylasAccountRepository
-from app.services.exceptions import DomainError, PermanentError
+from app.services.exceptions import DomainError, EmailEventNotFound, PermanentError
 from app.tasks.dispatcher import TaskDispatcher, get_dispatcher
 from app.utils.templates import append_unsubscribe_footer, replace_placeholders
 
@@ -155,7 +155,7 @@ class EmailService:
         """Send a reply from the inbox and record it. Per Architecture Section 5.6."""
         original = await self._event_repo.find_by_id(email_event_id)
         if not original:
-            raise DomainError("Email event not found", "EMAIL_EVENT_NOT_FOUND")
+            raise EmailEventNotFound(email_event_id)
 
         enrollment = await self._enrollment_repo.get_by_id(original.enrollment_id)
         if not enrollment:
