@@ -24,3 +24,4 @@ Architecture source: `docs/architecture/architecture.md` (Service Layer Pattern 
 - Services dispatch background work via dispatcher interface (not direct Celery task imports).
 - Task wrappers should call services; business rules must remain in services.
 - Service methods called by tasks must be idempotent/precondition-checked for at-least-once delivery semantics.
+- **MockClassifier keyword priority:** Check referral keywords before decline keywords. A reply like "not looking but talk to my colleague" is a referral, not a decline. The `not_interested` substring also contains `interested` — check `not_interested` before `interested`.

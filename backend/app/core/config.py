@@ -24,7 +24,6 @@ class Settings(BaseSettings):
 
     # Provider selection
     email_provider: str = Field(default="nylas")  # nylas | mock
-    llm_provider: str = Field(default="openai")  # openai | mock
 
     # Unsubscribe
     unsubscribe_base_url: str = Field(default="http://localhost:8000/api/unsubscribe")

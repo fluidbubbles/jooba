@@ -106,13 +106,13 @@ export default function InboxPage() {
   }
 
   if (loading) {
-    return <div className="p-8 text-gray-400">Loading...</div>
+    return <div className="p-8 text-gray-500">Loading...</div>
   }
 
   if (listError) {
     return (
       <div className="p-8">
-        <p className="text-red-400 mb-4">{listError}</p>
+        <p className="text-red-600 mb-4">{listError}</p>
         <button
           onClick={() => fetchReplies(activeTab)}
           className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg"
@@ -128,8 +128,8 @@ export default function InboxPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="px-8 pt-8 pb-4">
-        <h1 className="text-2xl font-semibold text-white mb-4">
-          Inbox {totalReplies > 0 && <span className="text-gray-500">({totalReplies} replies)</span>}
+        <h1 className="text-[28px] font-semibold tracking-tight text-gray-900 mb-4">
+          Inbox {totalReplies > 0 && <span className="text-gray-400">({totalReplies} replies)</span>}
         </h1>
 
         {totalReplies > 0 && (
@@ -140,10 +140,10 @@ export default function InboxPage() {
                 <button
                   key={tab.key}
                   onClick={() => handleTabChange(tab.key)}
-                  className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                  className={`px-3 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
                     activeTab === tab.key
-                      ? 'bg-blue-500/20 text-blue-400 font-medium'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      ? 'bg-blue-500 text-white'
+                      : 'border border-gray-200 text-gray-500 hover:border-gray-300'
                   }`}
                 >
                   {tab.label} ({count})
@@ -165,8 +165,8 @@ export default function InboxPage() {
       )}
 
       {totalReplies > 0 && (
-        <div className="flex flex-1 min-h-0 mx-8 mb-8 bg-[#1E2235] rounded-xl border border-gray-700/50 overflow-hidden">
-          <div className="w-[360px] border-r border-gray-700/50 overflow-y-auto">
+        <div className="flex flex-1 min-h-0 mx-8 mb-8 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className="w-[360px] border-r border-gray-200 overflow-y-auto">
             {replies.map((reply) => (
               <ReplyListItem
                 key={reply.id}
@@ -176,7 +176,7 @@ export default function InboxPage() {
               />
             ))}
             {replies.length === 0 && (
-              <div className="p-6 text-center text-gray-500 text-sm">
+              <div className="p-6 text-center text-gray-400 text-sm">
                 No {activeTab !== 'all' ? activeTab.replaceAll('_', ' ') : ''} replies
               </div>
             )}
@@ -186,18 +186,18 @@ export default function InboxPage() {
             {detail ? (
               <div>
                 <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-white">{detail.candidate_name}</h2>
-                  <p className="text-gray-400 text-sm">{detail.candidate_email}</p>
-                  <p className="text-gray-500 text-xs mt-1">Sequence: {detail.sequence_name}</p>
+                  <h2 className="text-lg font-semibold text-gray-900">{detail.candidate_name}</h2>
+                  <p className="text-gray-500 text-sm">{detail.candidate_email}</p>
+                  <p className="text-gray-400 text-xs mt-1">Sequence: {detail.sequence_name}</p>
                 </div>
 
                 {detail.sentiment && (
-                  <div className="mb-6 p-3 bg-[#151827] rounded-lg border border-gray-700/30">
+                  <div className="mb-6 p-3 rounded-lg border border-gray-100 bg-gray-50">
                     <div className="mb-1">
                       <SentimentBadge sentiment={detail.sentiment} size="md" />
                     </div>
                     {detail.sentiment_reasoning && (
-                      <p className="text-gray-400 text-sm italic">"{detail.sentiment_reasoning}"</p>
+                      <p className="text-gray-500 text-sm italic">"{detail.sentiment_reasoning}"</p>
                     )}
                   </div>
                 )}
@@ -206,22 +206,22 @@ export default function InboxPage() {
                 <ThreadView thread={detail.thread} candidateName={detail.candidate_name} />
 
                 {sendError && (
-                  <p className="text-red-400 text-sm mt-2">{sendError}</p>
+                  <p className="text-red-600 text-sm mt-2">{sendError}</p>
                 )}
                 <ReplyComposer onSend={handleSendReply} />
               </div>
             ) : detailError ? (
               <div className="flex flex-col items-center justify-center h-full gap-2">
-                <p className="text-red-400 text-sm">{detailError}</p>
+                <p className="text-red-600 text-sm">{detailError}</p>
                 <button
                   onClick={() => selectedId && fetchDetail(selectedId)}
-                  className="text-blue-400 text-sm hover:underline"
+                  className="text-blue-500 text-sm hover:underline"
                 >
                   Retry
                 </button>
               </div>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+              <div className="flex items-center justify-center h-full text-gray-400 text-sm">
                 Select a reply to view the thread
               </div>
             )}

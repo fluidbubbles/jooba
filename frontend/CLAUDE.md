@@ -27,3 +27,4 @@ npm run lint
 - For async table/list fetches, ignore stale responses (request token/ref or abort) before applying `setState`.
 - Modal dialogs must trap focus, restore previous focus on close, and exclude hidden inputs from tabbable selectors.
 - Components use `export default function ComponentName` — no named exports for components.
+- The app layout uses a **light theme** (`bg-[#F5F5F7]` in `Layout.tsx`). All pages and components must use light-theme colors: `text-gray-900` for headings, `bg-white` for cards, `border-gray-200` for borders. Do not use dark-theme patterns (`text-white`, `bg-[#1E2235]`, `bg-[#151827]`).
