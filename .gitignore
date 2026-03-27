@@ -1,4 +1,7 @@
-docs
+docs/*
+!docs/screenshots/
+docs/screenshots/*
+!docs/screenshots/mockups/
 test-results/
 .remember/
 # Python
