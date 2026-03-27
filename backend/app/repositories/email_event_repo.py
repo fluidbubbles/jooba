@@ -73,6 +73,29 @@ class EmailEventRepository:
         )
         return result.scalar_one_or_none()
 
+    async def find_recent_inbound(
+        self, enrollment_id: UUID, sender_email: str, within_seconds: int
+    ) -> EmailEvent | None:
+        """Find an inbound event for this enrollment from sender_email within the last N seconds.
+
+        Used to deduplicate the same reply arriving with different Nylas message IDs
+        when Gmail re-threads messages.
+        """
+        threshold = datetime.now(timezone.utc) - timedelta(seconds=within_seconds)
+        result = await self._db.execute(
+            select(EmailEvent)
+            .join(Enrollment, EmailEvent.enrollment_id == Enrollment.id)
+            .join(Candidate, Enrollment.candidate_id == Candidate.id)
+            .where(
+                EmailEvent.enrollment_id == enrollment_id,
+                EmailEvent.direction == EmailDirection.INBOUND.value,
+                EmailEvent.created_at >= threshold,
+                Candidate.email == sender_email,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def update_sentiment(
         self, event_id: UUID, sentiment: str, reasoning: str
     ) -> None:
