@@ -1,15 +1,3 @@
-x-backend-service-env: &backend-service-env
-  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://jooba:jooba@db:5432/jooba}
-  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-  NYLAS_API_KEY: ${NYLAS_API_KEY:-}
-  NYLAS_CLIENT_ID: ${NYLAS_CLIENT_ID:-}
-  SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-  EMAIL_PROVIDER: ${EMAIL_PROVIDER:-nylas}
-  LLM_PROVIDER: ${LLM_PROVIDER:-openai}
-  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-
-
-
 services:
   db:
     image: postgres:16
