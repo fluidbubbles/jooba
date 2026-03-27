@@ -24,12 +24,13 @@ export default function ReplyComposer({ onSend }: Props) {
 
   return (
     <div className="border-t border-gray-200 pt-4 mt-4">
+      <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-2">Reply</h3>
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
         placeholder="Write a reply..."
         rows={4}
-        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:border-blue-400 focus:ring-1 focus:ring-blue-400 focus:outline-none resize-y mb-3"
+        className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-gray-900 text-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y mb-3"
       />
       <div className="flex justify-end">
         <button

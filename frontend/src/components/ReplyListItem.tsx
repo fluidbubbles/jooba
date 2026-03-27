@@ -1,5 +1,6 @@
 import { Clock } from 'lucide-react'
 import type { InboxReply } from '../lib/types'
+import SentimentBadge from './SentimentBadge'
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -23,22 +24,30 @@ export default function ReplyListItem({ reply, isSelected, onClick }: Props) {
       onClick={onClick}
       className={`px-4 py-3 cursor-pointer border-b border-gray-100 transition-colors ${
         isSelected
-          ? 'bg-amber-50'
-          : 'bg-white hover:bg-gray-50'
+          ? 'bg-blue-50 border-blue-500'
+          : 'border-transparent hover:bg-gray-50'
       }`}
     >
-      <div className="flex items-center justify-between gap-2 mb-0.5">
-        <span className="text-sm font-semibold text-gray-900 truncate">{reply.candidate_name}</span>
-        <span className="text-xs text-gray-400 shrink-0">{timeAgo(reply.created_at)}</span>
+      <div className="flex items-center gap-2 mb-1">
+        <SentimentBadge sentiment={reply.sentiment} />
+        <span className="text-gray-900 text-sm font-medium truncate">{reply.candidate_name}</span>
       </div>
-      {reply.is_unreplied && (
-        <span className="inline-flex items-center gap-1 text-xs text-amber-600 font-medium mb-0.5">
-          <Clock size={11} />
-          Unreplied
-        </span>
-      )}
-      <p className="text-xs text-gray-500 mb-0.5 truncate">{reply.sequence_name}</p>
-      <p className="text-sm text-gray-500 line-clamp-2">{reply.body_snippet}</p>
+      <p className="text-gray-400 text-xs mb-1 truncate">{reply.candidate_email}</p>
+      <p className="text-gray-500 text-sm line-clamp-2 mb-2">"{reply.body_snippet}"</p>
+      <div className="flex items-center gap-3 text-xs text-gray-400">
+        <span>{reply.sequence_name}</span>
+        <span>&middot;</span>
+        <span>{timeAgo(reply.created_at)}</span>
+        {reply.is_unreplied && (
+          <>
+            <span>&middot;</span>
+            <span className="flex items-center gap-1 text-amber-500">
+              <Clock size={12} />
+              Unreplied
+            </span>
+          </>
+        )}
+      </div>
     </div>
   )
 }

@@ -12,7 +12,7 @@ class NylasAccount(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     grant_id: Mapped[str] = mapped_column(String, nullable=False)
-    email: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     provider: Mapped[str] = mapped_column(String, default="unknown")
     webhook_secret: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     connected_at: Mapped[datetime] = mapped_column(

@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     secret_key: str
 
     # Provider selection
-    email_provider: str  # nylas | mock
-    llm_provider: str  # openai | mock
+    email_provider: str = Field(default="nylas")  # nylas | mock
+    llm_provider: str = Field(default="openai")  # openai | mock
 
     # Unsubscribe
     unsubscribe_base_url: str

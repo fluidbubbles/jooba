@@ -210,7 +210,11 @@ async function openReplyDetail(page: Page, candidate: CandidateSeed): Promise<vo
   throw new Error(`Could not open detail panel for ${candidate.email}`)
 }
 
-function runSql(sql: string): void {
+function setSentimentForMessage(messageId: string, sentiment: CandidateSeed['sentiment']): void {
+  const sentimentSafe = sentiment.replace(/'/g, "''")
+  const messageSafe = messageId.replace(/'/g, "''")
+  const reasoningSafe = `E2E seeded sentiment: ${sentimentSafe}`.replace(/'/g, "''")
+  const sql = `UPDATE email_events SET sentiment = '${sentimentSafe}', sentiment_reasoning = '${reasoningSafe}' WHERE nylas_message_id = '${messageSafe}';`
   execFileSync(
     'docker',
     ['compose', 'exec', '-T', 'db', 'psql', '-U', 'jooba', '-d', 'jooba', '-c', sql],
@@ -218,15 +222,13 @@ function runSql(sql: string): void {
   )
 }
 
-function setSentimentForMessage(messageId: string, sentiment: CandidateSeed['sentiment']): void {
-  const sentimentSafe = sentiment.replace(/'/g, "''")
-  const messageSafe = messageId.replace(/'/g, "''")
-  const reasoningSafe = `E2E seeded sentiment: ${sentimentSafe}`.replace(/'/g, "''")
-  runSql(`UPDATE email_events SET sentiment = '${sentimentSafe}', sentiment_reasoning = '${reasoningSafe}' WHERE nylas_message_id = '${messageSafe}';`)
-}
-
 function ensureNylasAccount(): void {
-  runSql(`INSERT INTO nylas_accounts (id, email, grant_id, provider, connected_at) VALUES (gen_random_uuid(), 'e2e@example.com', 'fake-grant-e2e', 'virtual', now()) ON CONFLICT (email) DO UPDATE SET connected_at = now();`)
+  const sql = `INSERT INTO nylas_accounts (id, email, grant_id, provider, connected_at) VALUES (gen_random_uuid(), 'e2e@example.com', 'fake-grant-e2e', 'virtual', now()) ON CONFLICT (email) DO UPDATE SET connected_at = now();`
+  execFileSync(
+    'docker',
+    ['compose', 'exec', '-T', 'db', 'psql', '-U', 'jooba', '-d', 'jooba', '-c', sql],
+    { cwd: process.cwd() },
+  )
 }
 
 async function seedInbox(request: APIRequestContext): Promise<InboxSeed> {
@@ -468,5 +470,172 @@ test.describe('Inbox E2E - seeded flow', () => {
     const row = page.locator('tr').filter({ hasText: interestedEmail })
     await row.scrollIntoViewIfNeeded()
     await expect(row.getByText(/replied/i)).toBeVisible()
+  })
+
+  test('sentiment counts in filter tabs match seeded data', async ({ page }) => {
+    await page.goto('/inbox')
+    await expect(page.getByRole('button', { name: /^All \(/i })).toBeVisible()
+
+    // Each seeded sentiment has exactly 1 candidate, so total >= 4
+    const allButton = page.getByRole('button', { name: /^All \(/i })
+    const allText = await allButton.textContent()
+    const allMatch = allText?.match(/All \((\d+)\)/)
+    expect(allMatch).toBeTruthy()
+    expect(Number(allMatch![1])).toBeGreaterThanOrEqual(4)
+
+    // Each sentiment tab should show at least 1
+    for (const { buttonPattern, min } of [
+      { buttonPattern: /^Interested \((\d+)\)/, min: 1 },
+      { buttonPattern: /^Not Interested \((\d+)\)/, min: 1 },
+      { buttonPattern: /^Referral \((\d+)\)/, min: 1 },
+      { buttonPattern: /^Neutral \((\d+)\)/, min: 1 },
+    ]) {
+      const btn = page.getByRole('button', { name: buttonPattern })
+      await expect(btn).toBeVisible()
+      const text = await btn.textContent()
+      const match = text?.match(/\((\d+)\)/)
+      expect(match).toBeTruthy()
+      expect(Number(match![1])).toBeGreaterThanOrEqual(min)
+    }
+  })
+
+  test('reply detail shows sentiment badge and reasoning', async ({ page }) => {
+    await page.goto('/inbox')
+
+    // Filter to interested to find the right candidate
+    await page.getByRole('button', { name: /^Interested \(/i }).click()
+    await openReplyDetail(page, seed.candidates.interested)
+
+    const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
+
+    // Sentiment badge should show "Interested" text
+    await expect(detailPanel.getByText('Interested', { exact: true })).toBeVisible()
+
+    // Sentiment reasoning should be visible (set by setSentimentForMessage during seeding)
+    await expect(detailPanel.getByText(/E2E seeded sentiment/)).toBeVisible()
+  })
+
+  test('reply detail shows thread with message bubbles', async ({ page }) => {
+    await page.goto('/inbox')
+    await openReplyDetail(page, seed.candidates.interested)
+
+    // Thread heading should be visible
+    await expect(page.getByText('Thread', { exact: true })).toBeVisible()
+
+    // Thread should contain at least one message bubble (rounded-lg p-4 border)
+    const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
+    const messageBubbles = detailPanel.locator('div.space-y-3 > div.rounded-lg')
+    await expect(messageBubbles.first()).toBeVisible()
+    const bubbleCount = await messageBubbles.count()
+    expect(bubbleCount).toBeGreaterThanOrEqual(1)
+  })
+
+  test('clicking different replies updates the detail panel', async ({ page }) => {
+    await page.goto('/inbox')
+
+    // Click on the "All" tab to see all replies
+    await page.getByRole('button', { name: /^All \(/i }).click()
+
+    const interestedCandidate = seed.candidates.interested
+    const neutralCandidate = seed.candidates.neutral
+    const interestedFullName = `${interestedCandidate.firstName} ${interestedCandidate.lastName}`
+    const neutralFullName = `${neutralCandidate.firstName} ${neutralCandidate.lastName}`
+
+    // Open the interested candidate's detail
+    await openReplyDetail(page, interestedCandidate)
+    await expect(page.getByRole('heading', { name: interestedFullName })).toBeVisible()
+
+    // Click on the neutral candidate
+    await openReplyDetail(page, neutralCandidate)
+    await expect(page.getByRole('heading', { name: neutralFullName })).toBeVisible()
+
+    // The interested candidate's name heading should no longer be visible
+    await expect(page.getByRole('heading', { name: interestedFullName })).not.toBeVisible()
+  })
+
+  test('composer Send Reply button is disabled when textarea is empty', async ({ page }) => {
+    await page.goto('/inbox')
+    await openReplyDetail(page, seed.candidates.interested)
+
+    const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
+    await detailPanel.evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+    })
+
+    const sendButton = page.getByRole('button', { name: /Send Reply/i })
+    const textarea = page.locator('textarea').first()
+
+    // Initially empty — button should be disabled
+    await expect(textarea).toHaveValue('')
+    await expect(sendButton).toBeDisabled()
+
+    // Type something — button should become enabled
+    await textarea.fill('test message')
+    await expect(sendButton).toBeEnabled()
+
+    // Clear the textarea — button should be disabled again
+    await textarea.fill('')
+    await expect(sendButton).toBeDisabled()
+  })
+})
+
+test.describe('Inbox E2E - error state', () => {
+  test('shows error message and retry button on API failure', async ({ page }) => {
+    // Mock both inbox endpoints to return 500
+    await page.route('**/api/inbox/replies**', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Internal server error' }),
+      }),
+    )
+    await page.route('**/api/inbox/counts**', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Internal server error' }),
+      }),
+    )
+
+    await page.goto('/inbox')
+
+    // Error message should be visible
+    await expect(page.getByText('Failed to load inbox. Check your connection and try again.')).toBeVisible()
+
+    // Retry button should be visible
+    const retryButton = page.getByRole('button', { name: /Retry/i })
+    await expect(retryButton).toBeVisible()
+
+    // Unroute mock to let the retry hit real endpoints, then click Retry
+    await page.unroute('**/api/inbox/replies**')
+    await page.unroute('**/api/inbox/counts**')
+
+    // Re-mock with success (empty inbox) to verify retry works without needing seeded data
+    await page.route('**/api/inbox/replies**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
+      }),
+    )
+    await page.route('**/api/inbox/counts**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          all: 0,
+          interested: 0,
+          not_interested: 0,
+          referral: 0,
+          neutral: 0,
+        }),
+      }),
+    )
+
+    await retryButton.click()
+
+    // After retry, error should disappear and empty state should show
+    await expect(page.getByText('No replies yet')).toBeVisible()
+    await expect(page.getByText('Failed to load inbox')).not.toBeVisible()
   })
 })

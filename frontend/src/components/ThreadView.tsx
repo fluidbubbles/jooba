@@ -28,7 +28,7 @@ interface Props {
 
 export default function ThreadView({ thread, candidateName }: Props) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {thread.map((event) => {
         const sanitizedHtml = stripQuotedContent(
           DOMPurify.sanitize(event.body_html || event.body_text || ''),

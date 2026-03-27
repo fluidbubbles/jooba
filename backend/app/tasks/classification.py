@@ -8,8 +8,8 @@ from app.services.classification_service import ClassificationService
 
 logger = logging.getLogger(__name__)
 
-CLASSIFY_MAX_RETRIES = 3
-CLASSIFY_BACKOFFS = [10, 30, 90]
+CLASSIFY_MAX_RETRIES = 5
+CLASSIFY_BACKOFFS = [10, 30, 90, 600, 3600]
 
 
 @celery_app.task(

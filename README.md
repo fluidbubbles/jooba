@@ -139,6 +139,50 @@ This is a take-home project, but I built it with production structure. The patte
 
 **Unsubscribe links are stateless.** HMAC-signed tokens — no DB table, no expiry management. The signature proves the token is genuine without a lookup.
 
+Terminal states (REPLIED, COMPLETED, BOUNCED, OPTED_OUT) cannot transition to anything else.
+
+### Strategy Pattern (Swappable Integrations)
+
+External APIs are behind interfaces. The service layer calls a `Classifier` or `Sender` — it never imports `openai` or `nylas` directly.
+
+```python
+# config.py — swap providers with an env var
+email_provider: str = "nylas"      # nylas | mock
+```
+
+OpenAI is used directly for classification. Email sending can be swapped between Nylas and a mock sender for local testing.
+
+### Observer Pattern (via Celery Tasks)
+
+When something happens, the system fans out to independent tasks. Each task does one thing. Adding a new reaction means adding one task — zero changes to existing code.
+
+```
+"Inbound email received" triggers:
+├── classify_reply          (LLM classification)
+├── update_enrollment       (mark as replied, cancel follow-ups)
+└── log_state_transition    (audit log)
+
+"Reply classified as referral" triggers:
+├── extract_referral        (LLM extracts contact info)
+└── auto_enroll_referral    (enroll referred person)
+```
+
+Three separate Celery queues (`email`, `ai`, `default`) prevent slow LLM calls from blocking email sends.
+
+### Layered Architecture
+
+Each layer has exactly one job. No layer skips a level.
+
+| Layer | Responsibility | Knows About | Does NOT Know About |
+|-------|---------------|-------------|-------------------|
+| API | HTTP in/out, validation | Pydantic, Services | SQLAlchemy, Nylas, OpenAI |
+| Service | Business rules, orchestration | Repos, Integrations, Celery | FastAPI, HTTP |
+| Repository | Data access, all SQL | SQLAlchemy, DB session | Business rules, APIs |
+| Integration | External API wrappers | Nylas SDK, OpenAI SDK | Database, business rules |
+| Task | Async invocation + retry policy | Services only | Repositories, Integrations, FastAPI, HTTP |
+
+See `docs/architecture/architecture.md` for complete data flows, retry policies, and file structure.
+
 ## Assumptions & Tradeoffs
 
 - **Single recruiter, no auth.** The spec says "assume a single recruiter user." All endpoints are public. Adding auth is middleware — the architecture supports it without restructuring.

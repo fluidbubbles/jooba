@@ -186,7 +186,7 @@ export default function InboxPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="px-8 pt-8 pb-4">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-4">
+        <h1 className="text-[28px] font-semibold tracking-tight text-gray-900 mb-4">
           Inbox {totalReplies > 0 && <span className="text-gray-400">({totalReplies} replies)</span>}
         </h1>
 
@@ -198,10 +198,10 @@ export default function InboxPage() {
                 <button
                   key={tab.key}
                   onClick={() => handleTabChange(tab.key)}
-                  className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                  className={`px-3 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
                     activeTab === tab.key
-                      ? 'bg-green-500 text-white font-medium'
-                      : 'text-gray-500 border border-gray-300 hover:bg-gray-50'
+                      ? 'bg-blue-500 text-white'
+                      : 'border border-gray-200 text-gray-500 hover:border-gray-300'
                   }`}
                 >
                   {tab.label} ({count})
@@ -234,7 +234,7 @@ export default function InboxPage() {
               />
             ))}
             {replies.length === 0 && (
-              <div className="p-6 text-center text-gray-500 text-sm">
+              <div className="p-6 text-center text-gray-400 text-sm">
                 No {activeTab !== 'all' ? activeTab.replaceAll('_', ' ') : ''} replies
               </div>
             )}
@@ -288,7 +288,7 @@ export default function InboxPage() {
                 </button>
               </div>
             ) : (
-              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+              <div className="flex items-center justify-center h-full text-gray-400 text-sm">
                 Select a reply to view the thread
               </div>
             )}
