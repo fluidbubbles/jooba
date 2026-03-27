@@ -10,6 +10,9 @@ Take-home: recruiter outreach (sequences, CSV enroll, Nylas, LLM classification)
 - Keep API schemas domain-first and DRY: expose neutral names (for example `delay`) in JSON; keep storage-oriented names (for example `delay_minutes`) on models and in service/repo payloads, not in public request/response shapes; prefer shared schema bases over duplicated create/update shapes when behavior is identical.
 - Avoid module-level `__all__` by default; prefer explicit imports unless wildcard re-exports are required.
 - Favor pragmatic simplicity over over-engineering in refactors: keep tiny methods with distinct semantics explicit, and only add abstractions/helpers when duplication creates real maintenance cost.
+- Avoid extreme over-engineering in backend persistence (for example advisory locks for single-account replace or redundant `get_*_for_update` helpers) unless concurrency clearly requires it.
+- For end-to-end coverage requests, prefer Playwright (or equivalent) suites that run together over only stepping through cases manually one at a time.
+- When plans/features are split across branches (for example Plan 4 email vs Plan 5 inbox), do not assume backend work for one plan belongs on another branch without explicit confirmation.
 - For multi-task implementation plans, create/switch to a dedicated feature branch first, execute in strict plan task order, and run code-simplifier plus code-reviewer after each task boundary before moving to the next task.
 - When using `/revise-claude-md`, propose concise `CLAUDE.md` diffs first and apply only after explicit user approval.
 
@@ -21,6 +24,7 @@ Take-home: recruiter outreach (sequences, CSV enroll, Nylas, LLM classification)
 - Celery queues: 3 queues (`email`, `ai`, `default`). Single worker processes all three in demo (`-Q email,ai,default`).
 - Continual-learning incremental index lives at `.cursor/hooks/state/continual-learning-index.json`; transcript source is the Cursor project `agent-transcripts` directory.
 - `CLAUDE.md` is the canonical shared memory file for continual-learning updates in this workspace; keep durable memory here instead of a separate `AGENTS.md`.
+- Nylas webhook signing may use the same key material as the API client in this setup; a separate dedicated webhook secret is not always required.
 
 ## Quick start (full stack)
 
@@ -100,6 +104,7 @@ Use these defaults unless the user explicitly overrides. These rules apply to al
 - **Aggregation query rule:** Count concrete columns (for example `SequenceStep.id`), not relationship attributes; avoid N+1 loops for list counters.
 - **Testing rule:** API integration tests must run with an isolated DB dependency override/fixture; service tests should assert behaviors and exception paths, not only constants.
 - **Regression test rule:** When a bug or issue is identified, add a regression test that reproduces the failure. Then have subagents try to fix the bug and prove it with a passing test.
+- **Mock providers are for automated tests only:** Never switch to `LLM_PROVIDER=mock` or `EMAIL_PROVIDER=mock` during manual testing or debugging. Manual testing must use real provider calls (OpenAI, Nylas) so behavior matches production. Mock providers exist solely for `pytest` and Playwright e2e suites.
 - **No inline imports:** All imports must be at the top of the file. Never use inline/local imports inside functions or methods.
 - **No `from __future__ import annotations`:** The project targets Python 3.13+. PEP 604 unions (`X | Y`) and forward references work natively. Do not add `from __future__ import annotations`.
 - **Service DI:** Services receive repositories via constructor injection. For single-repo services use `Service(repo)`. For multi-repo services (e.g. `EnrollmentService`) the API factory may pass the session and let the service construct its repos internally — but services must still avoid importing SQLAlchemy types in their business logic.
@@ -111,7 +116,7 @@ Use these defaults unless the user explicitly overrides. These rules apply to al
 - **Dispatcher usage is mandatory:** All async task dispatch must go through `get_dispatcher()`, including from scheduler tasks. `get_dispatcher()` always returns `CeleryDispatcher` in runtime so beat/worker enqueue real tasks; `EMAIL_PROVIDER=mock` only swaps `MockSender`, not the queue. Use `SyncDispatcher` explicitly in tests when you register handlers. Do not call `celery_app.send_task()` from application code outside the dispatcher implementation.
 - **Unreplied detection is query-based:** No nudge timer columns (`nudge_due_at`, `nudge_dismissed`) or `set_nudge()` methods. Use `email_event_repo.get_unreplied_inbound()` query per architecture Section 5.7.
 - **Unsubscribe terminal-state rule:** `EnrollmentService.opt_out()` is idempotent for `replied`/`completed`/`bounced`/`opted_out`; only `active` and `paused` transition to `opted_out`.
-- **Step delay unit convention:** The `delay` field is unit-agnostic throughout the stack (API, frontend, DB column `delay_minutes`). The scheduler is the sole interpreter of units — it multiplies by 1440 to convert the stored value (days) to minutes for `timedelta`. Frontend labels say "days"; no conversion happens in API or frontend code.
+- **Step delay unit convention:** The `delay` field represents minutes throughout the stack (API, frontend, DB column `delay_minutes`). The scheduler uses the value directly as minutes for `timedelta`. Frontend labels say "minutes"; no conversion happens anywhere.
 - **Frontend API helper name:** The shared request function is `apiFetch` (defined in `src/lib/api.ts`). Never introduce `request`, `fetchApi`, or other aliases — all plans must use `apiFetch`.
 - **Analytics batch queries:** Dashboard `get_sequence_summaries()` must use batch GROUP BY queries across all sequences, not per-sequence loops (N+1). Applies to any repository aggregation method.
 

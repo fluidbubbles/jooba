@@ -22,7 +22,7 @@ export default function ReplyListItem({ reply, isSelected, onClick }: Props) {
   return (
     <div
       onClick={onClick}
-      className={`p-4 cursor-pointer border-l-2 transition-colors ${
+      className={`px-4 py-3 cursor-pointer border-b border-gray-100 transition-colors ${
         isSelected
           ? 'bg-blue-50 border-blue-500'
           : 'border-transparent hover:bg-gray-50'

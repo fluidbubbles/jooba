@@ -39,6 +39,8 @@ class ReplyDetail(BaseModel):
     candidate_name: str
     candidate_email: str
     sequence_name: str
+    current_step: int
+    total_steps: int
     sentiment: Sentiment | None
     sentiment_reasoning: str | None
     thread: list[ThreadEvent]
@@ -56,3 +58,4 @@ class SentimentCounts(BaseModel):
     not_interested: int = Field(default=0, ge=0)
     referral: int = Field(default=0, ge=0)
     neutral: int = Field(default=0, ge=0)
+    unreplied: int = Field(default=0, ge=0)

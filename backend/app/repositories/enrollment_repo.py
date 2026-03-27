@@ -101,6 +101,14 @@ class EnrollmentRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_state_transitions(self, enrollment_id: UUID) -> list[StateTransition]:
+        result = await self._db.execute(
+            select(StateTransition)
+            .where(StateTransition.enrollment_id == enrollment_id)
+            .order_by(StateTransition.created_at.asc())
+        )
+        return list(result.scalars().all())
+
     async def get_by_id_for_update(self, enrollment_id: UUID) -> Enrollment | None:
         result = await self._db.execute(
             select(Enrollment).where(Enrollment.id == enrollment_id).with_for_update()
@@ -304,8 +312,7 @@ class EnrollmentRepository:
             """),
             {"status": EnrollmentStatus.ACTIVE.value, "limit": limit},
         )
-        rows = result.fetchall()
-        return [row[0] for row in rows]
+        return list(result.scalars().all())
 
     async def requeue_claimed_enrollment(self, enrollment_id: UUID) -> None:
         """Restore immediate eligibility when scheduler dispatch fails."""

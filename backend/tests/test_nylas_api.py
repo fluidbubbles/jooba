@@ -2,6 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.exceptions import ProviderRateLimited, TransientError
 from app.services.nylas_connection_service import NylasConnectionService
@@ -32,7 +34,10 @@ async def _connect_account(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_status_disconnected_by_default(client: AsyncClient) -> None:
+async def test_status_disconnected_by_default(client: AsyncClient, db: AsyncSession) -> None:
+    await db.execute(text("DELETE FROM nylas_accounts"))
+    await db.commit()
+
     response = await client.get("/api/nylas/status")
 
     assert response.status_code == 200
@@ -164,3 +169,34 @@ async def test_disconnect_clears_connected_account(client: AsyncClient) -> None:
     assert disconnect_response.status_code == 200
     assert disconnect_response.json() == {"status": "disconnected"}
     assert status_response.json()["connected"] is False
+
+
+@pytest.mark.asyncio
+async def test_callback_calls_ensure_webhook_registered(client: AsyncClient) -> None:
+    """OAuth callback route must call ensure_webhook_registered after account is saved.
+    This test fails until the route explicitly calls it as a separate step."""
+    with (
+        patch(
+            "app.services.nylas_connection_service.NylasConnectionService.validate_oauth_state",
+            return_value=True,
+        ),
+        patch(
+            "app.integrations.nylas_client.NylasClient.exchange_code_for_grant",
+            return_value={
+                "grant_id": "grant_wh_test",
+                "email": "wh@example.com",
+                "provider": "google",
+            },
+        ),
+        patch(
+            "app.services.nylas_connection_service.NylasConnectionService.ensure_webhook_registered",
+            new_callable=AsyncMock,
+        ) as mock_wh,
+    ):
+        response = await client.get(
+            "/api/nylas/callback",
+            params={"code": "oauth-code", "state": "signed-state"},
+        )
+
+    assert response.status_code in _REDIRECT_STATUS
+    mock_wh.assert_awaited_once()

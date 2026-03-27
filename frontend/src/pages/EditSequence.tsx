@@ -225,21 +225,20 @@ export default function EditSequence() {
   const fieldsDisabled = formDisabled || !isDraft
   const readOnlyReason =
     loadedSequence && !isDraft
-      ? 'Only draft sequences can be edited. Activate or pause blocks changes here.'
+      ? 'Only draft sequences can be edited.'
       : null
-  const busyBanner = loading ? 'Loading sequence…' : saving ? 'Saving sequence…' : null
 
   if (!id) {
     return (
-      <div className="space-y-6 p-8">
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-800">
+      <div className="mx-auto max-w-3xl space-y-6 p-8">
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           Missing sequence id.
         </div>
         <Link
           to="/sequences"
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-700"
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900"
         >
-          <ArrowLeft size={16} aria-hidden />
+          <ArrowLeft size={15} aria-hidden />
           Back to sequences
         </Link>
       </div>
@@ -247,74 +246,72 @@ export default function EditSequence() {
   }
 
   return (
-    <div className="space-y-6 p-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <Link
-            to={`/sequences/${id}`}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900"
-          >
-            <ArrowLeft size={16} aria-hidden />
-            Back to sequence
-          </Link>
-          <h1 className="text-[28px] font-semibold tracking-tight text-gray-900">Edit sequence</h1>
-        </div>
-        <button
-          type="button"
-          disabled={fieldsDisabled || steps.length === 0}
-          onClick={() => void runSave()}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+    <div className="mx-auto max-w-3xl space-y-6 p-8">
+      {/* Header */}
+      <div className="space-y-4">
+        <Link
+          to={`/sequences/${id}`}
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-gray-900"
         >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+          <ArrowLeft size={15} aria-hidden />
+          Back to sequence
+        </Link>
+
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h1 className="text-2xl font-semibold text-gray-900">Edit sequence</h1>
+          <button
+            type="button"
+            disabled={fieldsDisabled || steps.length === 0}
+            onClick={() => void runSave()}
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save changes'}
+          </button>
+        </div>
       </div>
 
-      {loadError ? (
+      {loadError && (
         <div
           role="alert"
           className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3"
         >
-          <span className="text-[13px] text-red-800">{loadError}</span>
+          <span className="text-sm text-red-800">{loadError}</span>
           <button
             type="button"
             onClick={() => void loadSequence()}
-            className="shrink-0 rounded-md bg-white px-3 py-1.5 text-[13px] font-medium text-red-800 ring-1 ring-red-200 transition-colors hover:bg-red-50"
+            className="shrink-0 rounded-md bg-white px-3 py-1.5 text-sm font-medium text-red-800 ring-1 ring-red-200 transition-colors hover:bg-red-50"
           >
             Retry
           </button>
         </div>
-      ) : null}
+      )}
 
-      {readOnlyReason ? (
-        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+      {readOnlyReason && (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           {readOnlyReason}
         </div>
-      ) : null}
+      )}
 
-      {saveError ? (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-800">
+      {saveError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           {saveError}
         </div>
-      ) : null}
+      )}
 
-      {busyBanner ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-sm"
-        >
-          {busyBanner}
+      {loading && (
+        <div role="status" aria-live="polite" className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
+          Loading sequence...
         </div>
-      ) : null}
+      )}
 
-      {!loading && !loadError && loadedSequence && loadedSequence.id === id ? (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,320px)]">
-          <div className="space-y-6">
-            <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-              <h2 className="text-base font-semibold text-gray-900">Sequence</h2>
-              <div className="space-y-2">
-                <label htmlFor="edit-sequence-name" className="block text-xs font-medium text-gray-600">
-                  Name <span className="text-red-600">*</span>
+      {!loading && !loadError && isCurrentSequence && (
+        <>
+          {/* Sequence details */}
+          <div className="rounded-lg border border-gray-200 bg-white p-5">
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="edit-sequence-name" className="mb-1 block text-xs font-medium text-gray-500">
+                  Sequence name <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="edit-sequence-name"
@@ -322,78 +319,74 @@ export default function EditSequence() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={fieldsDisabled}
-                  className="h-10 w-full max-w-xl rounded-md border border-gray-200 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   autoComplete="off"
                 />
               </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-gray-900">Steps</h2>
-                <button
-                  type="button"
-                  onClick={addStep}
-                  disabled={fieldsDisabled}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Plus size={14} aria-hidden />
-                  Add step
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {steps.map((row, index) => (
-                  <StepEditor
-                    key={row.clientId}
-                    index={index}
-                    step={toStepInput(row)}
-                    totalSteps={steps.length}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="edit-meta-role" className="mb-1 block text-xs font-medium text-gray-500">
+                    Role title <span className="text-xs font-normal text-gray-400">(optional)</span>
+                  </label>
+                  <input
+                    id="edit-meta-role"
+                    type="text"
+                    value={roleTitle}
+                    onChange={(e) => setRoleTitle(e.target.value)}
                     disabled={fieldsDisabled}
-                    onChange={(patch) => updateStep(index, patch)}
-                    onRemove={() => removeStep(index)}
+                    className="h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
-                ))}
+                </div>
+                <div>
+                  <label htmlFor="edit-meta-company" className="mb-1 block text-xs font-medium text-gray-500">
+                    Company <span className="text-xs font-normal text-gray-400">(optional)</span>
+                  </label>
+                  <input
+                    id="edit-meta-company"
+                    type="text"
+                    value={company}
+                    onChange={(e) => setCompany(e.target.value)}
+                    disabled={fieldsDisabled}
+                    className="h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm lg:sticky lg:top-8 lg:self-start">
-            <h2 className="text-base font-semibold text-gray-900">Context (optional)</h2>
-            <p className="text-sm text-gray-500">
-              Used for personalization and AI-assisted copy. All fields are optional.
-            </p>
+          {/* Steps */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-900">
+                Steps <span className="ml-1 font-normal text-gray-400">({steps.length})</span>
+              </h2>
+              <button
+                type="button"
+                onClick={addStep}
+                disabled={fieldsDisabled}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus size={14} aria-hidden />
+                Add step
+              </button>
+            </div>
+
             <div className="space-y-3">
-              <div className="space-y-1">
-                <label htmlFor="edit-meta-role" className="block text-xs font-medium text-gray-600">
-                  Role title
-                </label>
-                <input
-                  id="edit-meta-role"
-                  type="text"
-                  value={roleTitle}
-                  onChange={(e) => setRoleTitle(e.target.value)}
+              {steps.map((row, index) => (
+                <StepEditor
+                  key={row.clientId}
+                  index={index}
+                  step={toStepInput(row)}
+                  totalSteps={steps.length}
                   disabled={fieldsDisabled}
-                  className="h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  onChange={(patch) => updateStep(index, patch)}
+                  onRemove={() => removeStep(index)}
                 />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="edit-meta-company" className="block text-xs font-medium text-gray-600">
-                  Company
-                </label>
-                <input
-                  id="edit-meta-company"
-                  type="text"
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  disabled={fieldsDisabled}
-                  className="h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
+              ))}
             </div>
           </div>
-        </div>
-      ) : null}
+        </>
+      )}
     </div>
   )
 }

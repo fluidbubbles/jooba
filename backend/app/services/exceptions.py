@@ -20,6 +20,11 @@ class CandidateNotFound(DomainError):
         super().__init__(f"Candidate not found: {identifier}", "CANDIDATE_NOT_FOUND")
 
 
+class EnrollmentNotFound(DomainError):
+    def __init__(self, enrollment_id: str | UUID) -> None:
+        super().__init__(f"Enrollment not found: {enrollment_id}", "ENROLLMENT_NOT_FOUND")
+
+
 class EnrollmentNotActive(DomainError):
     def __init__(self, enrollment_id: str | UUID) -> None:
         super().__init__(f"Enrollment is not active: {enrollment_id}", "ENROLLMENT_NOT_ACTIVE")

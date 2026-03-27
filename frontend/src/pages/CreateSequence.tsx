@@ -1,6 +1,6 @@
-import { Plus } from 'lucide-react'
+import { ArrowLeft, Plus } from 'lucide-react'
 import { useCallback, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import StepEditor from '../components/StepEditor'
 import { api, ApiRequestError } from '../lib/api'
 import type { SequenceCreateInput, StepInput } from '../lib/types'
@@ -161,128 +161,116 @@ export default function CreateSequence() {
   )
 
   return (
-    <div className="space-y-6 p-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <h1 className="text-[28px] font-semibold tracking-tight text-gray-900">Create sequence</h1>
-        <div className="flex flex-wrap gap-2">
+    <div className="mx-auto max-w-3xl space-y-6 p-8">
+      {/* Header */}
+      <div className="space-y-4">
+        <Link
+          to="/sequences"
+          className="inline-flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-gray-900"
+        >
+          <ArrowLeft size={15} aria-hidden />
+          Sequences
+        </Link>
+
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h1 className="text-2xl font-semibold text-gray-900">New sequence</h1>
           <button
             type="button"
             disabled={saving}
             onClick={() => void runSave('draft')}
-            className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? 'Saving…' : 'Save draft'}
-          </button>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => void runSave('activate')}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {saving ? 'Saving…' : 'Save & activate'}
+            {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
 
-      {error ? (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-800">
+      {error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           {error}
         </div>
-      ) : null}
+      )}
 
-      {saving ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-sm"
-        >
-          Saving sequence…
-        </div>
-      ) : null}
-
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,320px)]">
-        <div className="space-y-6">
-          <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-900">Sequence</h2>
-            <div className="space-y-2">
-              <label htmlFor="sequence-name" className="block text-xs font-medium text-gray-600">
-                Name <span className="text-red-600">*</span>
-              </label>
-              <input
-                id="sequence-name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={saving}
-                className="h-10 w-full max-w-xl rounded-md border border-gray-200 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                autoComplete="off"
-              />
-            </div>
+      {/* Sequence details */}
+      <div className="rounded-lg border border-gray-200 bg-white p-5">
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="sequence-name" className="mb-1 block text-xs font-medium text-gray-500">
+              Sequence name <span className="text-red-500">*</span>
+            </label>
+            <input
+              id="sequence-name"
+              type="text"
+              placeholder="e.g. Senior Engineer Outreach"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={saving}
+              className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              autoComplete="off"
+            />
           </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-gray-900">Steps</h2>
-              <button
-                type="button"
-                onClick={addStep}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Plus size={14} aria-hidden />
-                Add step
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {steps.map((row, index) => (
-                <StepEditor
-                  key={row.clientId}
-                  index={index}
-                  step={toStepInput(row)}
-                  totalSteps={steps.length}
-                  disabled={saving}
-                  onChange={(patch) => updateStep(index, patch)}
-                  onRemove={() => removeStep(index)}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm lg:sticky lg:top-8 lg:self-start">
-          <h2 className="text-base font-semibold text-gray-900">Context (optional)</h2>
-          <p className="text-sm text-gray-500">
-            Used for personalization and AI-assisted copy. All fields are optional.
-          </p>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label htmlFor="meta-role" className="block text-xs font-medium text-gray-600">
-                Role title
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="meta-role" className="mb-1 block text-xs font-medium text-gray-500">
+                Role title <span className="text-xs font-normal text-gray-400">(optional)</span>
               </label>
               <input
                 id="meta-role"
                 type="text"
+                placeholder="e.g. Backend Engineer"
                 value={roleTitle}
                 onChange={(e) => setRoleTitle(e.target.value)}
                 disabled={saving}
-                className="h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div className="space-y-1">
-              <label htmlFor="meta-company" className="block text-xs font-medium text-gray-600">
-                Company
+            <div>
+              <label htmlFor="meta-company" className="mb-1 block text-xs font-medium text-gray-500">
+                Company <span className="text-xs font-normal text-gray-400">(optional)</span>
               </label>
               <input
                 id="meta-company"
                 type="text"
+                placeholder="e.g. Acme Corp"
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
                 disabled={saving}
-                className="h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="h-9 w-full rounded-md border border-gray-200 px-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Steps */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-gray-900">
+            Steps <span className="ml-1 font-normal text-gray-400">({steps.length})</span>
+          </h2>
+          <button
+            type="button"
+            onClick={addStep}
+            disabled={saving}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus size={14} aria-hidden />
+            Add step
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {steps.map((row, index) => (
+            <StepEditor
+              key={row.clientId}
+              index={index}
+              step={toStepInput(row)}
+              totalSteps={steps.length}
+              disabled={saving}
+              onChange={(patch) => updateStep(index, patch)}
+              onRemove={() => removeStep(index)}
+            />
+          ))}
         </div>
       </div>
     </div>

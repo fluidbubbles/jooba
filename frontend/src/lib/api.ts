@@ -1,6 +1,8 @@
 import type {
   ApiError,
+  CandidateDetail,
   CandidateInput,
+  DashboardStats,
   EnrollmentStatus,
   EnrollResponse,
   InboxReply,
@@ -8,13 +10,16 @@ import type {
   NylasConnection,
   NylasDisconnectResponse,
   PaginatedEnrollments,
+  ReferralInfo,
   ReplyDetail,
+  SendReplyResponse,
   Sequence,
   SequenceAnalytics,
   SequenceCreateInput,
-  SequenceListItem,
+  PaginatedSequences,
   SequenceStatus,
   SequenceUpdateInput,
+  Sentiment,
   SentimentCounts,
 } from './types'
 
@@ -30,6 +35,10 @@ export class ApiRequestError extends Error {
     this.status = status
     this.code = code
   }
+}
+
+export function getApiErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiRequestError ? err.message : fallback
 }
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -49,13 +58,21 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     throw new ApiRequestError(res.status, body.error || res.statusText, body.code)
   }
 
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
 
 export const api = {
   sequences: {
-    list(): Promise<SequenceListItem[]> {
-      return apiFetch<SequenceListItem[]>('/sequences')
+    list(params?: { q?: string; status?: SequenceStatus; sort?: string; limit?: number; offset?: number }): Promise<PaginatedSequences> {
+      const qs = new URLSearchParams()
+      if (params?.q) qs.set('q', params.q)
+      if (params?.status) qs.set('status', params.status)
+      if (params?.sort) qs.set('sort', params.sort)
+      if (params?.limit != null) qs.set('limit', String(params.limit))
+      if (params?.offset != null) qs.set('offset', String(params.offset))
+      const suffix = qs.toString() ? `?${qs}` : ''
+      return apiFetch<PaginatedSequences>(`/sequences${suffix}`)
     },
 
     get(sequenceId: string): Promise<Sequence> {
@@ -68,6 +85,10 @@ export const api = {
 
     update(sequenceId: string, body: SequenceUpdateInput): Promise<Sequence> {
       return apiFetch<Sequence>(`/sequences/${sequenceId}`, { method: 'PUT', body: JSON.stringify(body) })
+    },
+
+    delete(sequenceId: string): Promise<void> {
+      return apiFetch<void>(`/sequences/${sequenceId}`, { method: 'DELETE' })
     },
 
     changeStatus(sequenceId: string, status: SequenceStatus): Promise<Sequence> {
@@ -97,6 +118,37 @@ export const api = {
     },
   },
 
+  analytics: {
+    dashboard(): Promise<DashboardStats> {
+      return apiFetch<DashboardStats>('/analytics/dashboard')
+    },
+  },
+
+  referrals: {
+    info(eventId: string): Promise<ReferralInfo | null> {
+      return apiFetch<ReferralInfo | null>(`/inbox/replies/${eventId}/referral`)
+    },
+
+    retry(eventId: string): Promise<ReferralInfo | null> {
+      return apiFetch<ReferralInfo | null>(`/inbox/replies/${eventId}/referral/retry`, {
+        method: 'POST',
+      })
+    },
+
+    enroll(eventId: string, sequenceId: string): Promise<EnrollResponse> {
+      return apiFetch<EnrollResponse>(`/inbox/replies/${eventId}/referral/enroll`, {
+        method: 'POST',
+        body: JSON.stringify({ sequence_id: sequenceId }),
+      })
+    },
+  },
+
+  candidates: {
+    timeline(enrollmentId: string): Promise<CandidateDetail> {
+      return apiFetch<CandidateDetail>(`/enrollments/${enrollmentId}/timeline`)
+    },
+  },
+
   nylas: {
     status(): Promise<NylasConnection> {
       return apiFetch<NylasConnection>('/nylas/status')
@@ -112,7 +164,7 @@ export const api = {
   },
 
   inbox: {
-    replies(sentiment?: string, limit = 50, offset = 0): Promise<InboxReply[]> {
+    replies(sentiment?: Sentiment | 'all' | 'unreplied', limit = 50, offset = 0): Promise<InboxReply[]> {
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
       if (sentiment && sentiment !== 'all') params.set('sentiment', sentiment)
       return apiFetch<InboxReply[]>(`/inbox/replies?${params}`)
@@ -126,8 +178,8 @@ export const api = {
       return apiFetch<ReplyDetail>(`/inbox/replies/${eventId}`)
     },
 
-    sendReply(eventId: string, bodyHtml: string): Promise<{ message_id: string; event_id: string }> {
-      return apiFetch<{ message_id: string; event_id: string }>(`/replies/${eventId}/reply`, {
+    sendReply(eventId: string, bodyHtml: string): Promise<SendReplyResponse> {
+      return apiFetch<SendReplyResponse>(`/replies/${eventId}/reply`, {
         method: 'POST',
         body: JSON.stringify({ body_html: bodyHtml }),
       })

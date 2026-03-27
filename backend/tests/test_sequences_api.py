@@ -47,7 +47,9 @@ async def test_list_returns_aggregate_counts(client: AsyncClient) -> None:
     )
     r = await client.get("/api/sequences")
     assert r.status_code == 200
-    items = r.json()
+    data = r.json()
+    assert data["total"] == 1
+    items = data["items"]
     assert len(items) == 1
     assert items[0]["step_count"] == 2
     assert items[0]["enrolled_count"] == 0

@@ -90,24 +90,88 @@ class NylasClient:
         except Exception as exc:
             self._raise_domain_error(exc, operation="send email")
 
-    def verify_webhook_signature(self, raw_body: bytes, signature: str) -> bool:
-        """Verify Nylas webhook signature.
+    def list_webhooks(self) -> list[dict[str, object]]:
+        """List all registered webhooks for this application."""
+        try:
+            response = self.client.webhooks.list()
+            return [
+                {
+                    "id": wh.id,
+                    "webhook_url": wh.webhook_url,
+                    "status": wh.status,
+                    "trigger_types": wh.trigger_types,
+                }
+                for wh in response.data
+            ]
+        except Exception as exc:
+            self._raise_domain_error(exc, operation="list webhooks")
 
-        Prefer `nylas_webhook_secret`, but fall back to `nylas_api_key` for
-        setups that use the API key as webhook signing secret.
-        """
-        secret = settings.nylas_webhook_secret or settings.nylas_api_key
-        if not secret:
-            logger.error(
-                "verify_webhook_signature called without webhook secret/api key - rejecting"
+    def create_webhook(self, webhook_url: str, trigger_types: list[str]) -> dict[str, str]:
+        """Register a new webhook with Nylas. Returns id and secret."""
+        try:
+            response = self.client.webhooks.create(
+                request_body={
+                    "trigger_types": trigger_types,
+                    "webhook_url": webhook_url,
+                }
             )
+            wh = response.data
+            return {
+                "id": wh.id,
+                "webhook_secret": wh.webhook_secret,
+            }
+        except Exception as exc:
+            self._raise_domain_error(exc, operation="register webhook")
+
+    def delete_webhook(self, webhook_id: str) -> None:
+        """Delete a registered webhook."""
+        try:
+            self.client.webhooks.destroy(webhook_id)
+        except Exception as exc:
+            self._raise_domain_error(exc, operation="delete webhook")
+
+    def list_messages(self, grant_id: str, received_after: int, limit: int = 25) -> list[dict]:
+        """Fetch recent messages from Nylas. Returns normalized dicts."""
+        try:
+            response = self.client.messages.list(
+                grant_id,
+                query_params={
+                    "limit": limit,
+                    "received_after": received_after,
+                },
+            )
+        except Exception as exc:
+            self._raise_domain_error(exc, operation="list messages")
+
+        results = []
+        for msg in response.data:
+            sender_email = ""
+            if msg.from_:
+                first_from = msg.from_[0]
+                if isinstance(first_from, dict):
+                    sender_email = first_from.get("email", "")
+                else:
+                    sender_email = first_from.email or ""
+            msg_date = msg.date if isinstance(msg.date, int) else getattr(msg, "date", 0) or 0
+            results.append({
+                "message_id": msg.id,
+                "thread_id": msg.thread_id,
+                "sender_email": sender_email,
+                "subject": msg.subject or "",
+                "body_html": msg.body or "",
+                "body_text": msg.snippet or "",
+                "date": msg_date,
+            })
+        return results
+
+    def verify_webhook_signature(self, raw_body: bytes, signature: str, secret: str | None = None) -> bool:
+        """Verify Nylas webhook signature using the provided secret."""
+        signing_key = secret or settings.nylas_webhook_secret or settings.nylas_api_key
+        if not signing_key:
+            logger.error("verify_webhook_signature called without any signing key - rejecting")
             return False
-        if not settings.nylas_webhook_secret:
-            logger.warning(
-                "nylas_webhook_secret not set; falling back to nylas_api_key for webhook verification"
-            )
         expected = hmac.new(
-            secret.encode(),
+            signing_key.encode(),
             raw_body,
             hashlib.sha256,
         ).hexdigest()

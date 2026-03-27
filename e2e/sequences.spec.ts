@@ -28,16 +28,16 @@ test.describe('Sequences List', () => {
     await page.goto('/sequences')
     await page.getByRole('button', { name: 'Create Sequence' }).click()
     await expect(page).toHaveURL('/sequences/new')
-    await expect(page.getByRole('heading', { name: 'Create sequence' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'New sequence' })).toBeVisible()
   })
 
   test('created sequence appears in the list', async ({ page }) => {
     const uniqueName = `List Test ${Date.now()}`
     // Create via UI to ensure same browser context
     await page.goto('/sequences/new')
-    await page.getByLabel('Name').fill(uniqueName)
+    await page.getByLabel('Sequence name').fill(uniqueName)
     await fillStep(page, 0, 'S1', 'B1')
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
 
     await page.goto('/sequences')
@@ -47,9 +47,9 @@ test.describe('Sequences List', () => {
   test('clicking sequence name navigates to detail', async ({ page }) => {
     const uniqueName = `Navigate Test ${Date.now()}`
     await page.goto('/sequences/new')
-    await page.getByLabel('Name').fill(uniqueName)
+    await page.getByLabel('Sequence name').fill(uniqueName)
     await fillStep(page, 0, 'S1', 'B1')
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
     const id = page.url().split('/sequences/')[1]
 
@@ -67,10 +67,10 @@ test.describe('Create Sequence', () => {
   test('save draft with valid data redirects to detail', async ({ page }) => {
     await page.goto('/sequences/new')
 
-    await page.getByLabel('Name').fill('Draft Sequence E2E')
+    await page.getByLabel('Sequence name').fill('Draft Sequence E2E')
     await fillStep(page, 0, 'Intro email', 'Hello, are you interested?')
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
 
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
     await expect(page.getByText('Draft Sequence E2E')).toBeVisible()
@@ -78,16 +78,19 @@ test.describe('Create Sequence', () => {
     await expect(page.getByText('Draft', { exact: true })).toBeVisible()
   })
 
-  test('save & activate creates active sequence', async ({ page }) => {
+  test('save then activate creates active sequence', async ({ page }) => {
     await page.goto('/sequences/new')
 
-    await page.getByLabel('Name').fill('Active Sequence E2E')
+    await page.getByLabel('Sequence name').fill('Active Sequence E2E')
     await fillStep(page, 0, 'Step 1', 'Body content here')
 
-    await page.getByRole('button', { name: 'Save & activate' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
 
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
     await expect(page.getByText('Active Sequence E2E')).toBeVisible()
+
+    // Activate from detail page
+    await page.getByRole('button', { name: 'Activate' }).click()
     // Should show Active badge, not Draft
     await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible()
   })
@@ -106,22 +109,22 @@ test.describe('Create Sequence', () => {
     // Step 1 should have a delay input
     await expect(page.locator('#step-1-delay')).toBeVisible()
 
-    // Remove step 1 (last Remove button)
-    await page.getByRole('button', { name: 'Remove' }).last().click()
+    // Remove step 1 (last Remove step button)
+    await page.getByRole('button', { name: 'Remove step' }).last().click()
     await expect(page.locator('#step-1-subject')).not.toBeVisible()
   })
 
   test('multi-step sequence with delays saves correctly', async ({ page }) => {
     await page.goto('/sequences/new')
 
-    await page.getByLabel('Name').fill('Multi Step E2E')
+    await page.getByLabel('Sequence name').fill('Multi Step E2E')
     await fillStep(page, 0, 'Initial outreach', 'Hi, interested in chatting?')
 
     await page.getByRole('button', { name: 'Add step' }).click()
     await fillStep(page, 1, 'Follow up', 'Just checking in!')
     await page.locator('#step-1-delay').fill('60')
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
 
     // Detail page should show both steps
@@ -133,12 +136,12 @@ test.describe('Create Sequence', () => {
   test('optional context fields save correctly', async ({ page }) => {
     await page.goto('/sequences/new')
 
-    await page.getByLabel('Name').fill('Context Test E2E')
+    await page.getByLabel('Sequence name').fill('Context Test E2E')
     await fillStep(page, 0, 'Subject', 'Body')
     await page.getByLabel('Role title').fill('Senior Engineer')
     await page.getByLabel('Company').fill('Acme Corp')
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
   })
 
@@ -148,7 +151,7 @@ test.describe('Create Sequence', () => {
     // Fill step but leave name empty
     await fillStep(page, 0, 'Subject', 'Body')
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
 
     await expect(page.getByRole('alert')).toBeVisible()
     await expect(page.getByRole('alert')).toContainText('name is required')
@@ -157,11 +160,11 @@ test.describe('Create Sequence', () => {
   test('validation: empty subject shows error', async ({ page }) => {
     await page.goto('/sequences/new')
 
-    await page.getByLabel('Name').fill('Test')
+    await page.getByLabel('Sequence name').fill('Test')
     await page.locator('#step-0-body').fill('Body text')
     // Leave subject empty
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
 
     await expect(page.getByRole('alert')).toBeVisible()
     await expect(page.getByRole('alert')).toContainText('subject is required')
@@ -170,11 +173,11 @@ test.describe('Create Sequence', () => {
   test('validation: empty body shows error', async ({ page }) => {
     await page.goto('/sequences/new')
 
-    await page.getByLabel('Name').fill('Test')
+    await page.getByLabel('Sequence name').fill('Test')
     await page.locator('#step-0-subject').fill('Subject')
     // Leave body empty
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
 
     await expect(page.getByRole('alert')).toBeVisible()
     await expect(page.getByRole('alert')).toContainText('body is required')
@@ -189,12 +192,12 @@ test.describe('Sequence Detail', () => {
   test('detail page shows sequence info and steps', async ({ page }) => {
     const uniqueName = `Detail View E2E ${Date.now()}`
     await page.goto('/sequences/new')
-    await page.getByLabel('Name').fill(uniqueName)
+    await page.getByLabel('Sequence name').fill(uniqueName)
     await fillStep(page, 0, 'Step One', 'First email body')
     await page.getByRole('button', { name: 'Add step' }).click()
     await fillStep(page, 1, 'Step Two', 'Follow up body')
     await page.locator('#step-1-delay').fill('30')
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
 
     await expect(page.getByRole('heading', { name: uniqueName })).toBeVisible()
@@ -214,9 +217,9 @@ test.describe('Sequence Detail', () => {
 test.describe('Status Transitions', () => {
   test('full lifecycle: draft → active → paused → resumed → archived', async ({ page }) => {
     await page.goto('/sequences/new')
-    await page.getByLabel('Name').fill(`Lifecycle E2E ${Date.now()}`)
+    await page.getByLabel('Sequence name').fill(`Lifecycle E2E ${Date.now()}`)
     await fillStep(page, 0, 'S1', 'B1')
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
 
     // Draft → Active
@@ -246,9 +249,9 @@ test.describe('Status Transitions', () => {
 
   test('draft shows Edit and Activate buttons', async ({ page }) => {
     await page.goto('/sequences/new')
-    await page.getByLabel('Name').fill(`Draft Buttons E2E ${Date.now()}`)
+    await page.getByLabel('Sequence name').fill(`Draft Buttons E2E ${Date.now()}`)
     await fillStep(page, 0, 'S1', 'B1')
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
     await expect(page.getByRole('button', { name: 'Edit' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Activate' })).toBeVisible()
@@ -263,9 +266,9 @@ test.describe('Edit Sequence', () => {
   test('edit draft: change name and steps', async ({ page }) => {
     // Create via UI so the sequence persists in the same request context
     await page.goto('/sequences/new')
-    await page.getByLabel('Name').fill('Edit Me E2E')
+    await page.getByLabel('Sequence name').fill('Edit Me E2E')
     await fillStep(page, 0, 'Original Subject', 'Original body')
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
     const id = page.url().split('/sequences/')[1]
 
@@ -293,10 +296,11 @@ test.describe('Edit Sequence', () => {
   test('edit active sequence shows read-only warning', async ({ page }) => {
     // Create and activate via UI
     await page.goto('/sequences/new')
-    await page.getByLabel('Name').fill('Active Edit E2E')
+    await page.getByLabel('Sequence name').fill('Active Edit E2E')
     await fillStep(page, 0, 'S1', 'B1')
-    await page.getByRole('button', { name: 'Save & activate' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
+    await page.getByRole('button', { name: 'Activate' }).click()
     const id = page.url().split('/sequences/')[1]
 
     await page.goto(`/sequences/${id}/edit`)
@@ -310,9 +314,9 @@ test.describe('Edit Sequence', () => {
 
   test('back to sequence link works from edit page', async ({ page }) => {
     await page.goto('/sequences/new')
-    await page.getByLabel('Name').fill('Back Link E2E')
+    await page.getByLabel('Sequence name').fill('Back Link E2E')
     await fillStep(page, 0, 'S1', 'B1')
-    await page.getByRole('button', { name: 'Save draft' }).click()
+    await page.getByRole('button', { name: 'Save' }).click()
     await expect(page).toHaveURL(/\/sequences\/[a-f0-9-]+$/)
     const id = page.url().split('/sequences/')[1]
 

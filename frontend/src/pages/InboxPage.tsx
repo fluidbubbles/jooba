@@ -1,36 +1,58 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '../lib/api'
-import type { InboxReply, ReplyDetail, SentimentCounts } from '../lib/types'
+import { useSearchParams } from 'react-router-dom'
+import { api, getApiErrorMessage } from '../lib/api'
+import type { InboxReply, ReplyDetail, Sentiment, SentimentCounts } from '../lib/types'
 import ReplyListItem from '../components/ReplyListItem'
 import ThreadView from '../components/ThreadView'
 import ReplyComposer from '../components/ReplyComposer'
 import SentimentBadge from '../components/SentimentBadge'
+import ReferralCard from '../components/ReferralCard'
 import EmptyState from '../components/EmptyState'
 import { Inbox } from 'lucide-react'
 
+type InboxTab = Sentiment | 'all' | 'unreplied'
+
 const TABS = [
   { key: 'all', label: 'All' },
+  { key: 'unreplied', label: 'Unreplied' },
   { key: 'interested', label: 'Interested' },
   { key: 'not_interested', label: 'Not Interested' },
   { key: 'referral', label: 'Referral' },
   { key: 'neutral', label: 'Neutral' },
-]
+] as const satisfies ReadonlyArray<{ key: InboxTab; label: string }>
+
+const VALID_FILTER_TABS: ReadonlySet<string> = new Set(TABS.map((t) => t.key))
+
+function isInboxTab(value: string): value is InboxTab {
+  return VALID_FILTER_TABS.has(value)
+}
+
+function tabFromSearchParams(searchParams: URLSearchParams): InboxTab {
+  const raw = searchParams.get('filter')
+  if (raw && isInboxTab(raw)) {
+    return raw
+  }
+  return 'all'
+}
 
 export default function InboxPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = tabFromSearchParams(searchParams)
   const [replies, setReplies] = useState<InboxReply[]>([])
   const [counts, setCounts] = useState<SentimentCounts | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<ReplyDetail | null>(null)
-  const [activeTab, setActiveTab] = useState('all')
   const [loading, setLoading] = useState(true)
   const [listError, setListError] = useState<string | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
   const loadTokenRef = useRef(0)
   const detailTokenRef = useRef(0)
+  const selectedIdRef = useRef<string | null>(null)
 
-  const fetchReplies = useCallback((tab: string) => {
+  const fetchReplies = useCallback((tab: InboxTab) => {
     const token = ++loadTokenRef.current
+    setLoading(true)
     setListError(null)
     Promise.all([
       api.inbox.replies(tab),
@@ -40,19 +62,29 @@ export default function InboxPage() {
       setReplies(repliesData)
       setCounts(countsData)
       setLoading(false)
-      if (repliesData.length > 0) {
-        setSelectedId((prev) => prev ?? repliesData[0].id)
+      const currentSelected = selectedIdRef.current
+      const nextSelected = currentSelected && repliesData.some((r) => r.id === currentSelected)
+        ? currentSelected
+        : (repliesData[0]?.id ?? null)
+      if (nextSelected !== currentSelected) {
+        setDetail(null)
+        setDetailError(null)
+        setSendError(null)
       }
+      selectedIdRef.current = nextSelected
+      setSelectedId(nextSelected)
     }).catch((err) => {
       console.error('Failed to load inbox replies', err)
       if (loadTokenRef.current === token) {
-        setListError('Failed to load inbox. Check your connection and try again.')
+        setListError(getApiErrorMessage(err, 'Failed to load inbox. Check your connection and try again.'))
         setLoading(false)
       }
     })
   }, [])
 
   useEffect(() => {
+    // Async fetch; state updates occur in promise callbacks, not synchronously in this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load inbox when tab (URL filter) changes
     fetchReplies(activeTab)
   }, [activeTab, fetchReplies])
 
@@ -65,44 +97,70 @@ export default function InboxPage() {
     }).catch((err) => {
       console.error('Failed to load reply detail', err)
       if (detailTokenRef.current === token) {
-        setDetailError('Failed to load thread. Click to retry.')
+        setDetailError(getApiErrorMessage(err, 'Failed to load thread. Click to retry.'))
       }
     })
   }, [])
 
   useEffect(() => {
+    selectedIdRef.current = selectedId
+  }, [selectedId])
+
+  useEffect(() => {
     if (selectedId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- load thread detail when selection changes
       fetchDetail(selectedId)
     }
   }, [selectedId, fetchDetail])
 
-  const handleTabChange = (tab: string) => {
-    setActiveTab(tab)
+  const handleTabChange = (tab: InboxTab) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (tab === 'all') {
+          next.delete('filter')
+        } else {
+          next.set('filter', tab)
+        }
+        return next
+      },
+      { replace: true },
+    )
     setSelectedId(null)
+    selectedIdRef.current = null
+    detailTokenRef.current += 1
     setDetail(null)
+    setDetailError(null)
+    setSendError(null)
   }
 
   const handleSelectReply = (id: string) => {
+    if (id === selectedIdRef.current) {
+      return
+    }
     setSelectedId(id)
+    selectedIdRef.current = id
+    detailTokenRef.current += 1
     setDetail(null)
+    setDetailError(null)
+    setSendError(null)
   }
 
   const handleSendReply = async (bodyHtml: string) => {
-    if (!selectedId) return
+    const targetId = selectedIdRef.current
+    if (!targetId) return
     setSendError(null)
     try {
-      await api.inbox.sendReply(selectedId, bodyHtml)
+      await api.inbox.sendReply(targetId, bodyHtml)
     } catch (err) {
       console.error('Failed to send reply', err)
-      setSendError('Failed to send reply. Please try again.')
+      setSendError(getApiErrorMessage(err, 'Failed to send reply. Please try again.'))
       throw err
     }
-    try {
-      const updated = await api.inbox.detail(selectedId)
-      setDetail(updated)
-    } catch (err) {
-      console.error('Failed to refresh thread after send', err)
+    if (selectedIdRef.current !== targetId) {
+      return
     }
+    fetchDetail(targetId)
   }
 
   if (loading) {
@@ -165,7 +223,7 @@ export default function InboxPage() {
       )}
 
       {totalReplies > 0 && (
-        <div className="flex flex-1 min-h-0 mx-8 mb-8 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+        <div className="flex flex-1 min-h-0 mx-8 mb-8 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="w-[360px] border-r border-gray-200 overflow-y-auto">
             {replies.map((reply) => (
               <ReplyListItem
@@ -183,26 +241,35 @@ export default function InboxPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-6">
-            {detail ? (
+            {selectedId && detail ? (
               <div>
                 <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-gray-900">{detail.candidate_name}</h2>
-                  <p className="text-gray-500 text-sm">{detail.candidate_email}</p>
-                  <p className="text-gray-400 text-xs mt-1">Sequence: {detail.sequence_name}</p>
+                  <h2 className="text-xl font-semibold text-gray-900">{detail.candidate_name}</h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {detail.candidate_email}
+                    <span className="mx-1.5">&middot;</span>
+                    Sequence: {detail.sequence_name}
+                    <span className="mx-1.5">&middot;</span>
+                    Step {detail.current_step}/{detail.total_steps}
+                  </p>
                 </div>
 
                 {detail.sentiment && (
-                  <div className="mb-6 p-3 rounded-lg border border-gray-100 bg-gray-50">
-                    <div className="mb-1">
-                      <SentimentBadge sentiment={detail.sentiment} size="md" />
-                    </div>
-                    {detail.sentiment_reasoning && (
-                      <p className="text-gray-500 text-sm italic">"{detail.sentiment_reasoning}"</p>
-                    )}
+                  <div className="mb-6">
+                    <SentimentBadge
+                      sentiment={detail.sentiment}
+                      size="md"
+                      variant="banner"
+                      reasoning={detail.sentiment_reasoning}
+                    />
                   </div>
                 )}
 
-                <h3 className="text-sm font-medium text-gray-400 uppercase tracking-wider mb-3">Thread</h3>
+                {detail.sentiment === 'referral' && (
+                  <ReferralCard emailEventId={selectedId} />
+                )}
+
+                <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">Thread</h3>
                 <ThreadView thread={detail.thread} candidateName={detail.candidate_name} />
 
                 {sendError && (
@@ -210,7 +277,7 @@ export default function InboxPage() {
                 )}
                 <ReplyComposer onSend={handleSendReply} />
               </div>
-            ) : detailError ? (
+            ) : detailError && selectedId ? (
               <div className="flex flex-col items-center justify-center h-full gap-2">
                 <p className="text-red-600 text-sm">{detailError}</p>
                 <button

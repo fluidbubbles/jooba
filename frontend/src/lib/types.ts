@@ -7,12 +7,18 @@ export type EnrollmentStatus = 'active' | 'replied' | 'completed' | 'bounced' | 
 /** Matches `app.models.enums.Sentiment` JSON values. */
 export type Sentiment = 'interested' | 'not_interested' | 'referral' | 'neutral'
 
+/** Matches `app.models.enums.EmailDirection` JSON values. */
+export type EmailDirection = 'inbound' | 'outbound'
+
 export interface SequenceStep {
   id: string
   step_order: number
   subject: string
   body_html: string
-  /** Delay before sending this step, in minutes. Stored as delay_minutes in DB; mapped to delay in the API schema. */
+  /**
+   * Delay before this step relative to the prior send (or enrollment start for step 1). Unit is defined by the
+   * product/scheduler only; API and UI expose the numeric value as-is (stored as `delay_minutes` in the DB).
+   */
   delay: number
 }
 
@@ -35,6 +41,11 @@ export interface SequenceListItem {
   enrolled_count: number
   replied_count: number
   created_at: string
+}
+
+export interface PaginatedSequences {
+  items: SequenceListItem[]
+  total: number
 }
 
 export interface StepInput {
@@ -139,7 +150,7 @@ export interface InboxReply {
 
 export interface ThreadEvent {
   id: string
-  direction: 'inbound' | 'outbound'
+  direction: EmailDirection
   subject: string | null
   body_html: string | null
   body_text: string | null
@@ -155,9 +166,17 @@ export interface ReplyDetail {
   candidate_name: string
   candidate_email: string
   sequence_name: string
+  current_step: number
+  total_steps: number
   sentiment: Sentiment | null
   sentiment_reasoning: string | null
   thread: ThreadEvent[]
+}
+
+/** Response from POST `/api/replies/{event_id}/reply` (manual send). */
+export interface SendReplyResponse {
+  message_id: string
+  event_id: string
 }
 
 export interface SentimentCounts {
@@ -166,4 +185,78 @@ export interface SentimentCounts {
   not_interested: number
   referral: number
   neutral: number
+  unreplied: number
+}
+
+/** Matches `app.schemas.analytics.SequenceSummary` (dashboard row per sequence). */
+export interface SequenceSummary {
+  id: string
+  name: string
+  status: SequenceStatus
+  step_count: number
+  enrolled: number
+  sent: number
+  replied: number
+  interested: number
+  last_activity: string | null
+}
+
+/** Matches `app.schemas.analytics.DashboardStats`. */
+export interface DashboardStats {
+  total_candidates: number
+  total_sent: number
+  total_replies: number
+  reply_rate: number
+  total_interested: number
+  unreplied_count: number
+  sequences: SequenceSummary[]
+}
+
+/** Matches `app.schemas.referral.ReferralInfo` (inbox referral card). */
+export interface ReferralInfo {
+  name: string | null
+  email: string | null
+  title: string | null
+  company: string | null
+  referrer_name: string
+  referrer_email: string
+  has_email: boolean
+  enrolled: boolean
+}
+
+/** Transition row in enrollment timeline (`TimelineTransitionEntry`). */
+export interface TimelineTransitionEntry {
+  type: 'transition'
+  timestamp: string
+  from_status: EnrollmentStatus | null
+  to_status: EnrollmentStatus
+  trigger: string
+}
+
+/** Email row in enrollment timeline (`TimelineEmailEntry`). */
+export interface TimelineEmailEntry {
+  type: 'email'
+  timestamp: string
+  direction: EmailDirection
+  subject: string | null
+  body_snippet: string
+  sentiment: Sentiment | null
+  step_index: number | null
+  is_manual_reply: boolean
+}
+
+/** Discriminated union matching `app.schemas.candidate_timeline.TimelineEntry`. */
+export type TimelineEntry = TimelineTransitionEntry | TimelineEmailEntry
+
+/** Matches `app.schemas.candidate_timeline.EnrollmentTimelineResponse` (candidate detail + timeline). */
+export interface CandidateDetail {
+  candidate: {
+    name: string
+    email: string
+    company?: string | null
+    title?: string | null
+  }
+  enrollment_status: EnrollmentStatus
+  timeline: TimelineEntry[]
+  referral: { referrer_name: string; referrer_email: string } | null
 }

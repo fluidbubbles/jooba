@@ -16,7 +16,7 @@ from app.repositories.nylas_account_repo import NylasAccountRepository
 from app.repositories.sequence_repo import SequenceRepository
 from app.schemas.enrollment import CandidateInput
 from app.services.email_service import EmailService
-from app.services.exceptions import InvalidSequenceData, PermanentError, SequenceNotFound
+from app.services.exceptions import EmailEventNotFound, InvalidSequenceData, PermanentError, SequenceNotFound
 from app.utils.unsubscribe import generate_unsubscribe_token, verify_unsubscribe_token
 
 if TYPE_CHECKING:
@@ -241,12 +241,21 @@ class EnrollmentService:
             if step_index > 0
             else None
         )
+
+        # For follow-up steps, use "Re: <first step subject>" so email clients
+        # thread all steps together instead of showing separate conversations.
+        send_subject = composed["subject"]
+        if reply_to_id and step_index > 0:
+            first_step = sequence.steps[0]
+            first_composed = EmailService.compose(first_step, candidate, enrollment.unsubscribe_token)
+            send_subject = f"Re: {first_composed['subject']}"
+
         idempotency_key = f"{enrollment_id}:{step_index}"
 
         result = sender.send(
             grant_id=grant_id,
             to=composed["to"],
-            subject=composed["subject"],
+            subject=send_subject,
             body_html=composed["body_html"],
             reply_to_message_id=reply_to_id,
             idempotency_key=idempotency_key,
@@ -256,7 +265,7 @@ class EnrollmentService:
             enrollment_id=enrollment_id,
             direction=EmailDirection.OUTBOUND.value,
             step_index=step_index,
-            subject=composed["subject"],
+            subject=send_subject,
             body_html=composed["body_html"],
             nylas_message_id=result.message_id,
             nylas_thread_id=result.thread_id,
@@ -277,6 +286,7 @@ class EnrollmentService:
                 trigger="email_sent",
             )
         else:
+            enrollment.current_step = step_index + 1
             enrollment.status = EnrollmentStatus.COMPLETED.value
             enrollment.next_send_at = None
             enrollment.completed_at = datetime.now(timezone.utc)
@@ -373,8 +383,7 @@ class EnrollmentService:
         """
         event = await self._event_repo.find_by_id(email_event_id)
         if not event:
-            logger.error("mark_replied_by_event: event %s not found", email_event_id)
-            return
+            raise EmailEventNotFound(email_event_id)
         await self.mark_replied(event.enrollment_id)
 
     async def mark_replied(self, enrollment_id: UUID) -> None:

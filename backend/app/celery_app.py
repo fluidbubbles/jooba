@@ -23,6 +23,17 @@ celery_app.conf.update(
             "task": "app.tasks.scheduler.send_due_emails",
             "schedule": 30.0,
         },
+        "poll-nylas-messages": {
+            "task": "app.tasks.nylas_poller.poll_nylas_messages",
+            "schedule": 300.0,
+        },
     },
-    include=["app.tasks.scheduler", "app.tasks.email_sending", "app.tasks.classification", "app.tasks.enrollment"],
+    include=[
+        "app.tasks.scheduler",
+        "app.tasks.email_sending",
+        "app.tasks.classification",
+        "app.tasks.enrollment",
+        "app.tasks.referral",
+        "app.tasks.nylas_poller",
+    ],
 )

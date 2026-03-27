@@ -19,7 +19,7 @@ class _SequenceWriteContext(BaseModel):
     company: str | None = Field(default=None, max_length=255)
 
 
-class StepInput(BaseModel):
+class StepInput(_StrictBody):
     subject: str = Field(min_length=1, max_length=500)
     body_html: str = Field(min_length=1)
     delay: int = Field(ge=0)
@@ -33,7 +33,7 @@ class StepResponse(_OrmSchema):
     delay: int = Field(ge=0, validation_alias="delay_minutes")
 
 
-class SequenceCreate(_SequenceWriteContext):
+class SequenceCreate(_StrictBody, _SequenceWriteContext):
     name: str = Field(min_length=1, max_length=255)
     steps: list[StepInput] = Field(min_length=1)
 
@@ -66,3 +66,8 @@ class SequenceListItem(_OrmSchema):
     enrolled_count: int = Field(ge=0)
     replied_count: int = Field(ge=0)
     created_at: datetime
+
+
+class PaginatedSequences(BaseModel):
+    items: list[SequenceListItem]
+    total: int

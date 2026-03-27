@@ -7,13 +7,14 @@ import pytest
 from app.integrations.openai_client import ClassificationResult
 from app.models.enums import Sentiment
 from app.services.classification_service import ClassificationService
+from app.services.exceptions import EmailEventNotFound
 
 
 def _build_service():
     service = ClassificationService(db=MagicMock())
     service._event_repo = SimpleNamespace(
         find_by_id=AsyncMock(),
-        update_sentiment=AsyncMock(),
+        update_sentiment_if_unset=AsyncMock(return_value=True),
     )
     return service
 
@@ -34,7 +35,7 @@ class TestClassify:
 
             await service.classify(event_id)
 
-        service._event_repo.update_sentiment.assert_awaited_once_with(
+        service._event_repo.update_sentiment_if_unset.assert_awaited_once_with(
             event_id, "interested", "detected interest",
         )
 
@@ -50,16 +51,17 @@ class TestClassify:
             await service.classify(event_id)
             mock_get.assert_not_called()
 
-        service._event_repo.update_sentiment.assert_not_awaited()
+        service._event_repo.update_sentiment_if_unset.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_nonexistent_event_returns_early(self):
+    async def test_nonexistent_event_raises(self):
         service = _build_service()
         service._event_repo.find_by_id.return_value = None
 
-        await service.classify(uuid4())
+        with pytest.raises(EmailEventNotFound):
+            await service.classify(uuid4())
 
-        service._event_repo.update_sentiment.assert_not_awaited()
+        service._event_repo.update_sentiment_if_unset.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_unknown_sentiment_defaults_to_neutral(self):
@@ -76,7 +78,7 @@ class TestClassify:
 
             await service.classify(event_id)
 
-        service._event_repo.update_sentiment.assert_awaited_once_with(
+        service._event_repo.update_sentiment_if_unset.assert_awaited_once_with(
             event_id, Sentiment.NEUTRAL.value, "unknown",
         )
 
@@ -152,3 +154,46 @@ class TestClassify:
             await service.classify(uuid4())
 
             mock_classifier.classify.assert_called_once_with("")
+
+    @pytest.mark.asyncio
+    async def test_referral_dispatches_extract_when_sentiment_applied(self):
+        service = _build_service()
+        event_id = uuid4()
+        service._event_repo.find_by_id.return_value = SimpleNamespace(
+            sentiment=None, body_text="Talk to my colleague Jane.", body_html=None,
+        )
+
+        with patch("app.services.classification_service.get_classifier") as mock_get:
+            mock_classifier = MagicMock()
+            mock_classifier.classify.return_value = ClassificationResult("referral", "referral")
+            mock_get.return_value = mock_classifier
+            with patch("app.services.classification_service.get_dispatcher") as mock_get_disp:
+                mock_dispatcher = MagicMock()
+                mock_get_disp.return_value = mock_dispatcher
+                await service.classify(event_id)
+
+        mock_dispatcher.dispatch.assert_called_once_with(
+            "app.tasks.referral.extract_referral",
+            str(event_id),
+            queue="ai",
+        )
+
+    @pytest.mark.asyncio
+    async def test_referral_not_dispatched_when_sentiment_not_applied(self):
+        service = _build_service()
+        event_id = uuid4()
+        service._event_repo.find_by_id.return_value = SimpleNamespace(
+            sentiment=None, body_text="Talk to Jane.", body_html=None,
+        )
+        service._event_repo.update_sentiment_if_unset = AsyncMock(return_value=False)
+
+        with patch("app.services.classification_service.get_classifier") as mock_get:
+            mock_classifier = MagicMock()
+            mock_classifier.classify.return_value = ClassificationResult("referral", "referral")
+            mock_get.return_value = mock_classifier
+            with patch("app.services.classification_service.get_dispatcher") as mock_get_disp:
+                mock_dispatcher = MagicMock()
+                mock_get_disp.return_value = mock_dispatcher
+                await service.classify(event_id)
+
+        mock_dispatcher.dispatch.assert_not_called()

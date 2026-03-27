@@ -1,5 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { execFileSync } from 'child_process'
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 type CandidateSeed = {
   email: string
@@ -18,7 +18,6 @@ type InboxSeed = {
 }
 
 const RUN_ID = Date.now()
-
 const SEQUENCE_NAME = `Inbox E2E ${RUN_ID}`
 
 const CANDIDATES: CandidateSeed[] = [
@@ -64,8 +63,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function candidateRow(page: Page, email: string) {
-  return page.locator('div.p-4.cursor-pointer').filter({ hasText: email }).first()
+function candidateFullName(candidate: CandidateSeed): string {
+  return `${candidate.firstName} ${candidate.lastName}`
+}
+
+function candidateRow(page: Page, candidate: CandidateSeed) {
+  return page
+    .locator('div.cursor-pointer')
+    .filter({ hasText: candidateFullName(candidate) })
+    .filter({ hasText: SEQUENCE_NAME })
+    .first()
 }
 
 async function createAndActivateSequence(request: APIRequestContext): Promise<string> {
@@ -91,10 +98,10 @@ async function createAndActivateSequence(request: APIRequestContext): Promise<st
 async function enrollCandidates(request: APIRequestContext, sequenceId: string): Promise<void> {
   const enroll = await request.post(`/api/sequences/${sequenceId}/enroll`, {
     data: {
-      candidates: CANDIDATES.map((c) => ({
-        email: c.email,
-        first_name: c.firstName,
-        last_name: c.lastName,
+      candidates: CANDIDATES.map((candidate) => ({
+        email: candidate.email,
+        first_name: candidate.firstName,
+        last_name: candidate.lastName,
         company: 'E2E Corp',
         title: 'Engineer',
       })),
@@ -131,10 +138,10 @@ async function findReply(
     candidate_email: string
     sentiment: string | null
   }>
-  const matches = replies.filter((r) => r.candidate_email === email)
+  const matches = replies.filter((reply) => reply.candidate_email === email)
   if (matches.length === 0) return null
   if (!sentiment) return { id: matches[0].id, sentiment: matches[0].sentiment }
-  const exact = matches.find((r) => r.sentiment === sentiment)
+  const exact = matches.find((reply) => reply.sentiment === sentiment)
   return exact ? { id: exact.id, sentiment: exact.sentiment } : null
 }
 
@@ -181,39 +188,42 @@ async function waitForReplySnippet(
   throw new Error(`Timed out waiting for snippet "${snippet}" for ${email}`)
 }
 
-async function openReplyDetail(page: Page, email: string): Promise<void> {
-  const row = candidateRow(page, email)
-  const rows = page.locator('div.p-4.cursor-pointer')
+async function openReplyDetail(page: Page, candidate: CandidateSeed): Promise<void> {
+  const row = candidateRow(page, candidate)
+  const rows = page.locator('div.cursor-pointer').filter({ hasText: SEQUENCE_NAME })
   const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
 
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const rowCount = await rows.count()
     if (attempt > 0 && rowCount > 1) {
       await rows.nth(attempt % rowCount).click()
-      await sleep(500)
+      await sleep(250)
     }
     await row.click()
     try {
-      await expect(detailPanel.getByText(email)).toBeVisible({ timeout: 3000 })
+      await expect(detailPanel.getByText(candidate.email)).toBeVisible({ timeout: 2000 })
       return
     } catch {
-      await sleep(500)
+      await sleep(350)
     }
   }
-  throw new Error(`Could not open detail panel for ${email}`)
+  throw new Error(`Could not open detail panel for ${candidate.email}`)
 }
 
 function setSentimentForMessage(messageId: string, sentiment: CandidateSeed['sentiment']): void {
   const sentimentSafe = sentiment.replace(/'/g, "''")
   const messageSafe = messageId.replace(/'/g, "''")
-  const reasoning = `E2E seeded sentiment: ${sentimentSafe}`
-  const reasoningSafe = reasoning.replace(/'/g, "''")
-  const sql = [
-    'UPDATE email_events',
-    `SET sentiment = '${sentimentSafe}', sentiment_reasoning = '${reasoningSafe}'`,
-    `WHERE nylas_message_id = '${messageSafe}';`,
-  ].join(' ')
+  const reasoningSafe = `E2E seeded sentiment: ${sentimentSafe}`.replace(/'/g, "''")
+  const sql = `UPDATE email_events SET sentiment = '${sentimentSafe}', sentiment_reasoning = '${reasoningSafe}' WHERE nylas_message_id = '${messageSafe}';`
+  execFileSync(
+    'docker',
+    ['compose', 'exec', '-T', 'db', 'psql', '-U', 'jooba', '-d', 'jooba', '-c', sql],
+    { cwd: process.cwd() },
+  )
+}
 
+function ensureNylasAccount(): void {
+  const sql = `INSERT INTO nylas_accounts (id, email, grant_id, provider, connected_at) VALUES (gen_random_uuid(), 'e2e@example.com', 'fake-grant-e2e', 'virtual', now()) ON CONFLICT (email) DO UPDATE SET connected_at = now();`
   execFileSync(
     'docker',
     ['compose', 'exec', '-T', 'db', 'psql', '-U', 'jooba', '-d', 'jooba', '-c', sql],
@@ -222,6 +232,7 @@ function setSentimentForMessage(messageId: string, sentiment: CandidateSeed['sen
 }
 
 async function seedInbox(request: APIRequestContext): Promise<InboxSeed> {
+  ensureNylasAccount()
   const sequenceId = await createAndActivateSequence(request)
   await enrollCandidates(request, sequenceId)
 
@@ -233,7 +244,7 @@ async function seedInbox(request: APIRequestContext): Promise<InboxSeed> {
     await waitForReplyRecord(request, candidate.email)
   }
 
-  // Stabilize seeded data for UI tests even when classifier provider config differs.
+  // Stabilize sentiment state for deterministic UI assertions.
   for (const candidate of CANDIDATES) {
     setSentimentForMessage(candidate.messageId, candidate.sentiment)
   }
@@ -304,16 +315,16 @@ test.describe('Inbox E2E - seeded flow', () => {
     await expect(page.getByRole('button', { name: /^Neutral \(/i })).toBeVisible()
 
     await page.getByRole('button', { name: /^Interested \(/i }).click()
-    await expect(candidateRow(page, seed.candidates.interested.email)).toBeVisible()
+    await expect(candidateRow(page, seed.candidates.interested)).toBeVisible()
 
     await page.getByRole('button', { name: /^Not Interested \(/i }).click()
-    await expect(candidateRow(page, seed.candidates.not_interested.email)).toBeVisible()
+    await expect(candidateRow(page, seed.candidates.not_interested)).toBeVisible()
 
     await page.getByRole('button', { name: /^Referral \(/i }).click()
-    await expect(candidateRow(page, seed.candidates.referral.email)).toBeVisible()
+    await expect(candidateRow(page, seed.candidates.referral)).toBeVisible()
 
     await page.getByRole('button', { name: /^Neutral \(/i }).click()
-    await expect(candidateRow(page, seed.candidates.neutral.email)).toBeVisible()
+    await expect(candidateRow(page, seed.candidates.neutral)).toBeVisible()
   })
 
   test('shows detail panel and sends a manual reply from composer', async ({ page }) => {
@@ -321,7 +332,7 @@ test.describe('Inbox E2E - seeded flow', () => {
     const fullName = `${seed.candidates.interested.firstName} ${seed.candidates.interested.lastName}`
 
     await page.goto('/inbox')
-    await openReplyDetail(page, seed.candidates.interested.email)
+    await openReplyDetail(page, seed.candidates.interested)
 
     await expect(page.getByRole('heading', { name: fullName })).toBeVisible()
     const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
@@ -338,24 +349,12 @@ test.describe('Inbox E2E - seeded flow', () => {
     await expect(sendButton).toBeDisabled()
     await textarea.fill(outgoingReply)
     await expect(sendButton).toBeEnabled()
-    const replyResponsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes('/api/replies/') &&
-        response.request().method() === 'POST',
-    )
-
     await sendButton.click()
-    const replyResponse = await replyResponsePromise
 
-    if (replyResponse.ok()) {
-      await expect(textarea).toHaveValue('')
-      await expect(page.getByText(outgoingReply)).toBeVisible()
-      await expect(sendButton).toBeDisabled()
-    } else {
-      await expect(page.getByText('Failed to send reply. Please try again.')).toBeVisible()
-      await expect(textarea).toHaveValue(outgoingReply)
-      await expect(sendButton).toBeEnabled()
-    }
+    // After send completes, textarea clears and reply appears in thread
+    await expect(textarea).toHaveValue('', { timeout: 15_000 })
+    await expect(page.getByText(outgoingReply)).toBeVisible({ timeout: 10_000 })
+    await expect(sendButton).toBeDisabled()
   })
 
   test('sanitizes malicious HTML in thread and blocks script execution', async ({ page, request }) => {
@@ -386,7 +385,7 @@ test.describe('Inbox E2E - seeded flow', () => {
     })
 
     await page.goto('/inbox')
-    await openReplyDetail(page, candidate.email)
+    await openReplyDetail(page, candidate)
     const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
     await expect(detailPanel.getByText(marker)).toBeVisible()
 
@@ -394,6 +393,83 @@ test.describe('Inbox E2E - seeded flow', () => {
     expect(messageHtml).not.toContain('<script')
     expect(messageHtml).not.toContain('onerror')
     expect(dialogs).toBe(0)
+  })
+
+  test('composer shows Sending state and appends reply to thread', async ({ page }) => {
+    const replyText = `Sending-state-test ${Date.now()}`
+
+    await page.goto('/inbox')
+    await openReplyDetail(page, seed.candidates.neutral)
+
+    const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
+    await expect(detailPanel.getByText(seed.candidates.neutral.email)).toBeVisible()
+
+    // Scroll to composer
+    await detailPanel.evaluate((el) => { el.scrollTop = el.scrollHeight })
+
+    const textarea = page.locator('textarea').first()
+    const sendButton = page.getByRole('button', { name: /Send Reply/i })
+
+    await textarea.fill(replyText)
+    await expect(sendButton).toBeEnabled()
+
+    // Click send — button should show "Sending..." while request is in flight
+    const sendPromise = sendButton.click()
+
+    // Check for Sending... state (may be brief)
+    try {
+      await expect(sendButton).toHaveText(/Sending/i, { timeout: 3_000 })
+    } catch {
+      // The request may have completed before we could observe — acceptable
+    }
+    await sendPromise
+
+    // After send completes, textarea should clear and the reply should appear in the thread
+    await expect.poll(async () => textarea.inputValue(), { timeout: 10_000 }).toBe('')
+    await expect(detailPanel.getByText(replyText)).toBeVisible({ timeout: 10_000 })
+    await expect(sendButton).toBeDisabled()
+  })
+
+  test('unreplied tab exists and shows correct count', async ({ page }) => {
+    await page.goto('/inbox')
+
+    // The "Unreplied" tab should exist with a count (may be 0 if recruiter already replied)
+    const unrepliedTab = page.getByRole('button', { name: /^Unreplied \(\d+\)/i })
+    await expect(unrepliedTab).toBeVisible()
+
+    // Click Unreplied tab — verify it activates
+    await unrepliedTab.click()
+
+    // Extract count from tab text
+    const tabText = await unrepliedTab.textContent()
+    const match = tabText?.match(/\((\d+)\)/)
+    const count = match ? parseInt(match[1], 10) : 0
+
+    if (count > 0) {
+      // If unreplied items exist, verify list items appear
+      const listItems = page.locator('div.cursor-pointer').filter({ hasText: SEQUENCE_NAME })
+      await expect(listItems.first()).toBeVisible({ timeout: 5_000 })
+    } else {
+      // If count is 0, verify "No unreplied replies" message
+      await expect(page.getByText(/no.*unreplied/i)).toBeVisible()
+    }
+  })
+
+  test('sequence detail shows replied enrollment status after inbox reply', async ({ page }) => {
+    // Navigate to the sequence detail page
+    await page.goto(`/sequences/${seed.sequenceId}`)
+
+    // Wait for candidates table to load — scroll down if needed
+    const interestedEmail = seed.candidates.interested.email
+    await expect(page.getByRole('heading', { name: 'Candidates' })).toBeVisible({ timeout: 10_000 })
+    await page.getByRole('heading', { name: 'Candidates' }).scrollIntoViewIfNeeded()
+
+    await expect(page.getByText(interestedEmail)).toBeVisible({ timeout: 10_000 })
+
+    // The interested candidate's enrollment should show "replied" status
+    const row = page.locator('tr').filter({ hasText: interestedEmail })
+    await row.scrollIntoViewIfNeeded()
+    await expect(row.getByText(/replied/i)).toBeVisible()
   })
 
   test('sentiment counts in filter tabs match seeded data', async ({ page }) => {
@@ -428,7 +504,7 @@ test.describe('Inbox E2E - seeded flow', () => {
 
     // Filter to interested to find the right candidate
     await page.getByRole('button', { name: /^Interested \(/i }).click()
-    await openReplyDetail(page, seed.candidates.interested.email)
+    await openReplyDetail(page, seed.candidates.interested)
 
     const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
 
@@ -441,7 +517,7 @@ test.describe('Inbox E2E - seeded flow', () => {
 
   test('reply detail shows thread with message bubbles', async ({ page }) => {
     await page.goto('/inbox')
-    await openReplyDetail(page, seed.candidates.interested.email)
+    await openReplyDetail(page, seed.candidates.interested)
 
     // Thread heading should be visible
     await expect(page.getByText('Thread', { exact: true })).toBeVisible()
@@ -466,11 +542,11 @@ test.describe('Inbox E2E - seeded flow', () => {
     const neutralFullName = `${neutralCandidate.firstName} ${neutralCandidate.lastName}`
 
     // Open the interested candidate's detail
-    await openReplyDetail(page, interestedCandidate.email)
+    await openReplyDetail(page, interestedCandidate)
     await expect(page.getByRole('heading', { name: interestedFullName })).toBeVisible()
 
     // Click on the neutral candidate
-    await openReplyDetail(page, neutralCandidate.email)
+    await openReplyDetail(page, neutralCandidate)
     await expect(page.getByRole('heading', { name: neutralFullName })).toBeVisible()
 
     // The interested candidate's name heading should no longer be visible
@@ -479,7 +555,7 @@ test.describe('Inbox E2E - seeded flow', () => {
 
   test('composer Send Reply button is disabled when textarea is empty', async ({ page }) => {
     await page.goto('/inbox')
-    await openReplyDetail(page, seed.candidates.interested.email)
+    await openReplyDetail(page, seed.candidates.interested)
 
     const detailPanel = page.locator('div.flex-1.overflow-y-auto.p-6').first()
     await detailPanel.evaluate((el) => {

@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.nylas_account import NylasAccount
@@ -25,6 +25,13 @@ class NylasAccountRepository:
         self._db.add(account)
         await self._db.flush()
         return account
+
+    async def set_webhook_secret(self, secret: str) -> None:
+        """Store the webhook signing secret on the connected account."""
+        await self._db.execute(
+            update(NylasAccount).values(webhook_secret=secret)
+        )
+        await self._db.flush()
 
     async def delete_all(self) -> None:
         """Disconnect — remove all accounts (single-user, so just one)."""

@@ -1,6 +1,15 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(name)s - %(message)s",
+)
+
+from app.api.analytics import router as analytics_router
+from app.api.candidates import router as candidates_router
 from app.api.enrollments import router as enrollments_router
 from app.api.exception_handlers import register_exception_handlers
 from app.api.health import router as health_router
@@ -24,8 +33,10 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(analytics_router)
 app.include_router(sequences_router)
 app.include_router(enrollments_router)
+app.include_router(candidates_router)
 app.include_router(nylas_router)
 app.include_router(unsubscribe_router)
 app.include_router(webhooks_router)

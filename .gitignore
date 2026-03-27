@@ -1,8 +1,5 @@
-docs/designs
-docs/screenshots
-docs/superpowers
-docs/summaries
-docs/original_task
+docs
+test-results/
 .remember/
 # Python
 __pycache__/

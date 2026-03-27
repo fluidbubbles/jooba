@@ -24,4 +24,5 @@ Architecture source: `docs/architecture/architecture.md` (Service Layer Pattern 
 - Services dispatch background work via dispatcher interface (not direct Celery task imports).
 - Task wrappers should call services; business rules must remain in services.
 - Service methods called by tasks must be idempotent/precondition-checked for at-least-once delivery semantics.
+- **Enrollment completion must increment `current_step`:** When the last step is sent, `current_step` must be set to `step_index + 1` before marking `status=completed`. Otherwise the UI shows "N-1 of N" for completed enrollments.
 - **MockClassifier keyword priority:** Check referral keywords before decline keywords. A reply like "not looking but talk to my colleague" is a referral, not a decline. The `not_interested` substring also contains `interested` — check `not_interested` before `interested`.
