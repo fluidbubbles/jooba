@@ -241,12 +241,21 @@ class EnrollmentService:
             if step_index > 0
             else None
         )
+
+        # For follow-up steps, use "Re: <first step subject>" so email clients
+        # thread all steps together instead of showing separate conversations.
+        send_subject = composed["subject"]
+        if reply_to_id and step_index > 0:
+            first_step = sequence.steps[0]
+            first_composed = EmailService.compose(first_step, candidate, enrollment.unsubscribe_token)
+            send_subject = f"Re: {first_composed['subject']}"
+
         idempotency_key = f"{enrollment_id}:{step_index}"
 
         result = sender.send(
             grant_id=grant_id,
             to=composed["to"],
-            subject=composed["subject"],
+            subject=send_subject,
             body_html=composed["body_html"],
             reply_to_message_id=reply_to_id,
             idempotency_key=idempotency_key,
@@ -256,7 +265,7 @@ class EnrollmentService:
             enrollment_id=enrollment_id,
             direction=EmailDirection.OUTBOUND.value,
             step_index=step_index,
-            subject=composed["subject"],
+            subject=send_subject,
             body_html=composed["body_html"],
             nylas_message_id=result.message_id,
             nylas_thread_id=result.thread_id,

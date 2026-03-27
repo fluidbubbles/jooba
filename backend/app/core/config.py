@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     nylas_api_key: str
     nylas_callback_url: str
     nylas_webhook_secret: str = ""  # auto-stored on webhook registration
-    nylas_webhook_url: str = ""  # optional — polling fallback if unset
+    nylas_webhook_url: str  # public URL for Nylas webhook delivery (required)
 
     # OpenAI
     openai_api_key: str

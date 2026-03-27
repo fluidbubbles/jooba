@@ -68,6 +68,7 @@ async def oauth_callback(
         logger.exception("Nylas OAuth callback handling failed")
         return _settings_redirect("?error=auth_failed")
 
+    await service.ensure_webhook_registered()
     return _settings_redirect("?connected=true")
 
 

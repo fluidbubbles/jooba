@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 from openai import APIError, AuthenticationError, OpenAI, RateLimitError
@@ -52,6 +53,15 @@ class ReferralExtraction:
     company: str | None
 
 
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?\s*```$", re.DOTALL)
+
+
+def _strip_code_fences(text: str) -> str:
+    """Strip markdown code fences that LLMs sometimes wrap JSON in."""
+    m = _CODE_FENCE_RE.match(text)
+    return m.group(1).strip() if m else text
+
+
 def _clean_opt_str(parsed: dict, key: str) -> str | None:
     """Extract an optional trimmed string from a parsed JSON dict."""
     value = parsed.get(key)
@@ -92,7 +102,7 @@ class OpenAIClient:
         raw_content = response.choices[0].message.content
         if raw_content is None:
             raise TransientError("OpenAI returned empty content for classification")
-        content = raw_content.strip()
+        content = _strip_code_fences(raw_content.strip())
         try:
             parsed = json.loads(content)
             return ClassificationResult(
@@ -112,7 +122,7 @@ class OpenAIClient:
         raw_content = response.choices[0].message.content
         if raw_content is None:
             raise TransientError("OpenAI returned empty content for referral extraction")
-        content = raw_content.strip()
+        content = _strip_code_fences(raw_content.strip())
         try:
             parsed = json.loads(content)
             if not isinstance(parsed, dict):

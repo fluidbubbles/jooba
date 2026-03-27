@@ -34,7 +34,6 @@ class NylasConnectionService:
             email=grant_data["email"],
             provider=grant_data.get("provider", "unknown"),
         )
-        await self._ensure_webhook_registered()
 
     async def get_connection_status(self) -> NylasConnectionStatus:
         account = await self._repo.get_first()
@@ -48,10 +47,16 @@ class NylasConnectionService:
         )
 
     async def disconnect(self) -> None:
+        await self._deregister_webhook()
         await self._repo.delete_all()
 
-    async def _ensure_webhook_registered(self) -> None:
-        """Register a Nylas webhook for message.created if configured and not already present."""
+    async def ensure_webhook_registered(self) -> None:
+        """Register a Nylas webhook for message.created if configured and not already present.
+
+        Idempotent — safe to call multiple times or from different callsites
+        (route, startup). Logs and continues if registration fails so polling
+        remains the fallback.
+        """
         webhook_url = settings.nylas_webhook_url
         if not webhook_url:
             logger.debug("NYLAS_WEBHOOK_URL not set, skipping webhook registration")
@@ -79,6 +84,21 @@ class NylasConnectionService:
             )
         except Exception:
             logger.exception("Failed to register Nylas webhook — polling will catch messages")
+
+    async def _deregister_webhook(self) -> None:
+        """Remove the webhook from Nylas matching NYLAS_WEBHOOK_URL, if present."""
+        webhook_url = settings.nylas_webhook_url
+        if not webhook_url:
+            return
+        try:
+            existing = await asyncio.to_thread(self._client.list_webhooks)
+            for wh in existing:
+                if wh.get("webhook_url") == webhook_url:
+                    await asyncio.to_thread(self._client.delete_webhook, wh["id"])
+                    logger.info("Deleted Nylas webhook id=%s", wh["id"])
+                    return
+        except Exception:
+            logger.exception("Failed to delete Nylas webhook on disconnect")
 
     def generate_oauth_state(self) -> str:
         issued_at = str(int(time.time()))
